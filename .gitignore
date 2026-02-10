@@ -33,7 +33,6 @@ private/
 private_tests/
 
 # Not public
-benchmarks/
 tests/
 docs/
 kernelboost/_extras/
