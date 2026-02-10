@@ -61,7 +61,7 @@ There are three main components to KernelBooster: KernelBooster class that does 
 
 After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is random with increasing kernel sizes in terms of number of features. Random feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more rounds. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
 
-KernelTree splits numerical data by density and categorical data by MSE. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the crucial benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves 90% of compute.
+KernelTree splits numerical data by density and categorical data by MSE. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a whopping 90% of compute.
 
 The actual estimation is handled by KernelEstimator. It optimizes a scalar precision (inverse bandwidth) for the local constant estimator using leave-one-out cross validation and random search between given bounds. It has both Gaussian and (isotropic) Laplace kernels with default being the Laplace kernel. KernelEstimator also has uncertainty quantification methods for quantile and conditional variance prediction, but these are at this moment still experimental as they use a "naive" single kernel method whose precision is optimized for mean prediction.
 
@@ -210,7 +210,7 @@ GP (n=5000)              0.3297     0.4061     0.7524      67.7s
 
 ### Uncertainty Quantification (California Housing)
 
-Prediction intervals and variance estimates compared to Gaussian Process regression:
+Prediction intervals and conditional variance estimates compared to Gaussian Process (sklearn) regression:
 ```text
 =================================================================
 Uncertainty Quantification (90% intervals, alpha=0.1)
@@ -222,7 +222,7 @@ GP (n=5000)              90.9%    1.863      0.157       1.026
 =================================================================
 ```
 
-Var Corr is the correlation between predicted variance and squared errors and
+Var Corr is the correlation between predicted variance and squared errors.
 Var Ratio is the ratio between mean of squared_errors and predicted variance. 
 
 ### CPU/GPU training time comparison (California Housing)

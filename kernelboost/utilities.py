@@ -187,7 +187,7 @@ def calculate_auroc(
     fpr_sorted = fpr[sort_idx]
     tpr_sorted = tpr[sort_idx]
 
-    auroc = np.trapezoid(tpr_sorted, fpr_sorted)
+    auroc = np.trapz(tpr_sorted, fpr_sorted)
 
     roc_array = np.column_stack([fpr, tpr])
     return auroc, roc_array
@@ -226,7 +226,7 @@ def calculate_auprc(y: np.ndarray, predictions: np.ndarray) -> tuple[float, np.n
     recall_sorted = recall[sort_idx]
     precision_sorted = precision[sort_idx]
 
-    auprc = np.trapezoid(precision_sorted, recall_sorted)
+    auprc = np.trapz(precision_sorted, recall_sorted)
 
     pr_array = np.column_stack([recall, precision])
     return auprc, pr_array
