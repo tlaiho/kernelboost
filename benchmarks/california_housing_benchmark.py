@@ -1,6 +1,6 @@
-"""California Housing regression benchmark for KernelBooster.
+"""California Housing regression benchmark.
 
-Compares KernelBooster against sklearn HistGradientBoostingRegressor,
+Compares KernelBoost against sklearn HistGradientBoostingRegressor,
 XGBoost, and LightGBM on the California Housing dataset.
 
 Usage:
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     kb.fit(X_train, y_train, eval_set=(X_val, y_val))
     kb_time = time.time() - t0
     mse, mae, r2, _ = evaluate(kb, X_test, y_test)
-    results.append(("KernelBooster", mse, mae, r2, kb_time))
+    results.append(("KernelBoost", mse, mae, r2, kb_time))
 
     # HGBR  
     hgb = HistGradientBoostingRegressor(

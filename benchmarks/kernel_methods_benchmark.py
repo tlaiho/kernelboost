@@ -1,6 +1,6 @@
 """Kernel methods benchmark on California Housing dataset.
 
-Compares KernelBooster against sklearn kernel-based methods:
+Compares KernelBoost against sklearn kernel-based methods:
 KernelRidge, SVR, and GaussianProcessRegressor.
 
 Usage:
@@ -48,7 +48,7 @@ def evaluate_variance(y_true, y_pred, variance):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kernel methods benchmark")
-    parser.add_argument("--no-gpu", action="store_true", help="CPU only for KernelBooster")
+    parser.add_argument("--no-gpu", action="store_true", help="CPU only for KernelBoost")
     parser.add_argument("--n-train", type=int, default=10000, help="Training set size (default: 10000)")
     parser.add_argument("--n-train-gp", type=int, default=5000, help="Training set size for GP (default: 5000)")
     args = parser.parse_args()
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     kb.fit(X_train, y_train, eval_set=(X_val, y_val))
     kb_time = time.time() - t0
     mse, mae, r2, _ = evaluate(kb, X_test, y_test)
-    results.append(("KernelBooster", mse, mae, r2, kb_time))
+    results.append(("KernelBoost", mse, mae, r2, kb_time))
 
     print("Training KernelRidge...")
     kr = KernelRidge(kernel='rbf', alpha=1.0, gamma=0.1)
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     alpha = 0.1
     z = 1.645  
 
-    # KernelBooster uncertainty
+    # KernelBoost uncertainty
     kb_pred = kb.predict(X_test).ravel()
     kb_lower, kb_upper = kb.predict_intervals(X_test, alpha=alpha)
     kb_variance = kb.predict_variance(X_test)
@@ -182,6 +182,6 @@ if __name__ == "__main__":
 
     print(f"{'Model':<20} {'Coverage':>10} {'Width':>8} {'Var Corr':>10} {'Var Ratio':>11}")
     print("-" * 65)
-    print(f"{'KernelBooster':<20} {kb_coverage:>9.1%} {kb_width:>8.3f} {kb_var_corr:>10.3f} {kb_var_ratio:>11.3f}")
+    print(f"{'KernelBoost':<20} {kb_coverage:>9.1%} {kb_width:>8.3f} {kb_var_corr:>10.3f} {kb_var_ratio:>11.3f}")
     print(f"{f'GP (n={n_train_gp})':<20} {gp_coverage:>9.1%} {gp_width:>8.3f} {gp_var_corr:>10.3f} {gp_var_ratio:>11.3f}")
     print("=" * 65)

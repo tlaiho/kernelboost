@@ -1,4 +1,4 @@
-"""CPU vs GPU training time benchmark for KernelBooster.
+"""CPU vs GPU training time benchmark.
 
 Compares training time between CPU (C/OpenMP) and GPU (CuPy/CUDA) backends
 on the California Housing dataset.

@@ -1,6 +1,6 @@
-"""Breast Cancer binary classification benchmark for KernelBooster.
+"""Breast Cancer binary classification benchmark.
 
-Compares KernelBooster against sklearn HistGradientBoostingClassifier,
+Compares KernelBoost against sklearn HistGradientBoostingClassifier,
 XGBoost, and LightGBM on the Wisconsin Breast Cancer dataset.
 
 Usage:
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     kb.fit(X_train, y_train)
     kb_time = time.time() - t0
     acc, auc, f1, _ = evaluate(kb, X_test, y_test)
-    results.append(("KernelBooster", acc, auc, f1, kb_time))
+    results.append(("KernelBoost", acc, auc, f1, kb_time))
 
     # HGBC
     hgb = HistGradientBoostingClassifier(
