@@ -39,11 +39,11 @@ class KernelBooster:
         boundaries in kernel trees.
     kernel_type : str, default='laplace'
         Kernel type: 'gaussian' or 'laplace'.
-    precision_method : str, default='search'
+    precision_method : str, default='pilot-cv'
         Precision optimization method.
     search_rounds : int, default=20
         Precision optimization iterations.
-    bounds : tuple, default=(0.10, 18.0)
+    bounds : tuple, default=(0.10, 35.0)
         Precision search bounds.
     initial_precision : float, default=0.0
         Starting precision. 0 means auto.
@@ -76,9 +76,9 @@ class KernelBooster:
         min_sample: int = 500,
         overlap_epsilon: float = 0.05,
         kernel_type: str = 'laplace',
-        precision_method: str = 'search',
+        precision_method: str = 'pilot-cv',
         search_rounds: int = 20,
-        bounds: tuple = (0.10, 18.0),
+        bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
         early_stopping_rounds: int = 20,

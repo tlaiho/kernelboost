@@ -28,6 +28,9 @@ htmlcov/
 # AI instructions
 CLAUDE.md
 
+# PyPI-specific README
+PYPI_README.md
+
 # Private directories
 private/
 private_tests/

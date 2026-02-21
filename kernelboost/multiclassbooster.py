@@ -49,7 +49,10 @@ class MulticlassBooster:
         Kernel type: 'gaussian' or 'laplace'.
     search_rounds : int, default=20
         Precision optimization iterations.
-    bounds : tuple, default=(0.50, 5.55)
+    precision_method : str, default='pilot-cv'
+        Precision selection method: 'pilot-cv' (pilot bounds + LOO-CV),
+        'search' (LOO-CV with fixed bounds), or 'silverman' (rule-of-thumb).
+    bounds : tuple, default=(0.20, 35.0)
         Precision search bounds.
     initial_precision : float, default=0.0
         Starting precision. 0 means auto.
@@ -83,8 +86,9 @@ class MulticlassBooster:
         min_sample: int = 1000,
         overlap_epsilon: float = 0.0,
         kernel_type: str = 'laplace',
+        precision_method: str = 'pilot-cv',
         search_rounds: int = 20,
-        bounds: tuple = (0.50, 5.55),
+        bounds: tuple = (0.20, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
         early_stopping_rounds: int = 5,
@@ -113,6 +117,7 @@ class MulticlassBooster:
 
         self.kernel_optimization = {
             'kernel_type': kernel_type,
+            'precision_method': precision_method,
             'search_rounds': search_rounds,
             'bounds': bounds,
             'initial_precision': initial_precision,

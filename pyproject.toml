@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "kernelboost"
 version = "0.1.0"
 description = "Gradient boosting with kernel regression base learners"
-readme = "README.md"
+readme = "PYPI_README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [{name = "tlaiho", email = "tslaiho@gmail.com"}]

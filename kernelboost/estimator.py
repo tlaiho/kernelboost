@@ -1,6 +1,6 @@
 import numpy as np
 from .backend import Backend
-from .optimizer import optimize_precision
+from .optimizer import optimize_precision, estimate_bounds
 from .utilities import r2_score
 
 
@@ -15,15 +15,15 @@ class KernelEstimator:
         Kernel type: 'gaussian' or 'laplace'.
     search_rounds : int, default=20
         Number of optimization rounds for precision search.
-    bounds : tuple, default=(0.50, 10)
+    bounds : tuple, default=(0.10, 35.0)
         Lower and upper bounds for precision optimization.
     initial_precision : float, default=0.0
         Initial precision value for optimization. 0.0 means auto.
     sample_share : float, default=1.0
         Fraction of data to use for precision optimization (for large datasets).
-    precision_method : str, default='search'
-        Precision selection method: 'search' (LOO-CV) or 'silverman' (rule-of-thumb,
-        mainly for testing).
+    precision_method : str, default='pilot-cv'
+        Precision selection method: 'search' (LOO-CV) 'pilot-CV' (bounds for pilot, then LOO-CV) 
+        or 'silverman' (rule-of-thumb for testing).
     seed : int, default=None
         Random seed for reproducibility when subsampling during precision optimization.
     """
@@ -33,10 +33,10 @@ class KernelEstimator:
         use_gpu: bool = False,
         kernel_type: str = 'laplace',
         search_rounds: int = 20,
-        bounds: tuple = (0.10, 15.0),
+        bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
-        precision_method: str = 'search',
+        precision_method: str = 'pilot-cv',
         seed: int = None,
     ):
         if kernel_type not in {'gaussian', 'laplace'}:
@@ -103,6 +103,11 @@ class KernelEstimator:
             X = self.X_
 
         mean_y = float(np.mean(y))
+
+        if self.precision_method == 'pilot-cv':
+            self.kernel_optimization['bounds'] = estimate_bounds(
+                X, y, self.kernel_type, self.bounds)
+            self.kernel_optimization['precision_method'] = 'search'
 
         if self.use_gpu:
             import cupy as cp

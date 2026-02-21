@@ -108,7 +108,6 @@ if __name__ == "__main__":
         max_features=5,
         overlap_epsilon=0.05,
         early_stopping_rounds=25,
-        bounds=(0.10, 18.0),
         use_gpu=use_gpu,
         verbose=0,
     )

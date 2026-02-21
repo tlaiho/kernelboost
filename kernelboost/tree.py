@@ -144,13 +144,13 @@ class KernelTree:
         Kernel type: 'gaussian' or 'laplace'.
     search_rounds : int, default=20
         Number of optimization rounds for precision search in kernel estimators.
-    bounds : tuple, default=(0.5, 15.0)
+    bounds : tuple, default=(0.10, 35.0)
         Lower and upper bounds for precision optimization.
     initial_precision : float, default=0.0
         Initial precision value for optimization. 0.0 means auto.
     sample_share : float, default=1.0
         Fraction of data to use for precision optimization.
-    precision_method : str, default='search'
+    precision_method : str, default='pilot-cv'
         Precision selection method: 'search' (LOO-CV) or 'silverman'.
     """
 
@@ -164,10 +164,10 @@ class KernelTree:
         use_gpu: bool = False,
         kernel_type: str = 'gaussian',
         search_rounds: int = 20,
-        bounds: tuple = (0.1, 15.0),
+        bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
-        precision_method: str = 'search',
+        precision_method: str = 'pilot-cv',
     ):
 
         self.min_sample = min_sample
