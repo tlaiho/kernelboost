@@ -42,7 +42,8 @@ def evaluate_variance(y_true, y_pred, variance):
     """Evaluate variance calibration via correlation and ratio with squared errors."""
     squared_errors = (y_true - y_pred) ** 2
     correlation = np.corrcoef(variance.ravel(), squared_errors.ravel())[0, 1]
-    ratio = np.mean(squared_errors) / np.mean(variance) 
+    sq_variance = np.sum(squared_errors) / (squared_errors.shape[0] - 1)
+    ratio = sq_variance / np.mean(variance) 
     return correlation, ratio
 
 
@@ -100,14 +101,14 @@ if __name__ == "__main__":
         feature_selector=selector,
         max_sample=4000,
         min_sample=750,
-        rounds=250,
+        n_estimators=250,
         subsample_share=0.8,
         lambda1=0.0002,
         learning_rate=0.8,
         min_features=1,
         max_features=5,
         overlap_epsilon=0.05,
-        early_stopping_rounds=25,
+        n_iter_no_change=25,
         use_gpu=use_gpu,
         verbose=0,
     )

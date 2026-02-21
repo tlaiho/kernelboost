@@ -7,7 +7,7 @@
 ![C](https://img.shields.io/badge/C-language-blue)
 ![GPU](https://img.shields.io/badge/GPU-CUDA%20C%2FCuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 
 KernelBoost is a gradient boosting algorithm that uses Nadaraya-Watson (local constant) kernel estimators as base learners instead of decision trees. It has:
 
@@ -59,7 +59,7 @@ With [suitable preprocessing](#data-preprocessing), KernelBoost can match popula
 
 There are three main components to KernelBoost: KernelBooster class that does the boosting, KernelTree class that does the splitting and KernelEstimator class that implements the local constant estimation. As kernel methods are computationally expensive, the guiding principle has been computational efficiency.  
 
-After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is random with increasing kernel sizes in terms of number of features. Random feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more rounds. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
+After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is random with increasing kernel sizes in terms of number of features. Random feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more boosting iterations. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
 
 KernelTree splits numerical data by density and categorical data by MSE. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a whopping 90% of compute.
 
@@ -90,10 +90,10 @@ booster = KernelBooster(
 
 #### Early Stopping
 
-Training stops automatically if evaluation loss doesn't improve for consecutive rounds (controlled by early_stopping_rounds parameter).
+Training stops automatically if evaluation loss doesn't improve for consecutive rounds (controlled by n_iter_no_change parameter).
 
 ```python
-booster.fit(X_train, y_train, eval_set=(X_val, y_val), early_stopping_rounds=20)
+booster.fit(X_train, y_train, eval_set=(X_val, y_val))
 ```
 
 #### RhoOptimizer
@@ -151,20 +151,42 @@ Like other kernel methods, KernelBoost works best with continuous, smooth featur
 | `SmartSelector` | mRMR-style feature selection |
 | `RandomSelector` | Random feature selection |
 | `RhoOptimizer` | Post-hoc step size optimization |
-| `RankTransformer` | Percentile normalization |
+| `RankTransformer` | Rank-based feature scaling |
 
-## KernelBooster Main Parameters
+## Main Parameters
+
+### KernelBooster
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `objective` | Required | Loss function: `MSEObjective()`, `EntropyObjective()`, `QuantileObjective()` |
-| `rounds` | auto | Boosting iterations (auto = n_features * 10) |
+| `n_estimators` | auto | Boosting iterations (auto = n_features * 15) |
 | `max_features` | auto | Max features per estimator (auto = min(10, n_features)) |
 | `min_features` | 1 | Min features per estimator |
-| `kernel_type` | 'laplace' | Kernel function: 'laplace' or 'gaussian' |
+| `subsample_share` | 0.5 | Training sample share per round |
 | `learning_rate` | 0.5 | Step size shrinkage factor |
 | `lambda1` | 0.0 | L1 regularization |
+| `n_iter_no_change` | 20 | Rounds without improvement before early stopping |
+| `verbose` | 0 | Verbosity level |
 | `use_gpu` | False | Enable GPU acceleration |
+
+### KernelTree (exposed via KernelBooster)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_depth` | 3 | Maximum tree depth |
+| `max_sample` | 5000 | Maximum samples per leaf (triggers splits) |
+| `min_sample` | 500 | Minimum samples for kernel fitting |
+| `overlap_epsilon` | 0.05 | Fraction of feature range to expand data beyond split boundaries |
+
+### KernelEstimator (exposed via KernelBooster / KernelTree)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `kernel_type` | 'laplace' | Kernel function: 'laplace' or 'gaussian' |
+| `precision_method` | 'pilot-cv' | Bandwidth optimization: 'pilot-cv', 'search', or 'silverman' |
+| `search_rounds` | 20 | Precision optimization iterations |
+| `bounds` | (0.1, 35.0) | Precision search bounds |
 
 ## Benchmarks
 
@@ -247,10 +269,12 @@ All benchmarks run on Ubuntu 22.04 with Ryzen 7700 and RTX 3090.
 - Fan, J., & Yao, Q. (1998). Efficient estimation of conditional variance functions in stochastic regression. Biometrika, 85(3), 645–660.
 - Friedman, J. H. (2001). *Greedy Function Approximation: A Gradient Boosting Machine*. Annals of Statistics, 29(5), 1189-1232.
 - Hansen, B. E. (2004). Nonparametric Conditional Density Estimation. Working paper, University of Wisconsin.
+- Nadaraya, E. A. (1964). On Estimating Regression. Theory of Probability and Its Applications, 9(1), 141-142.
+- Watson, G. S. (1964). Smooth Regression Analysis. Sankhyā: The Indian Journal of Statistics, Series A, 26(4), 359-372.
 
 ## About
 
-KernelBoost is a hobby project exploring alternatives to tree-based gradient boosting. Currently v0.1.0. Pre-compiled binaries included for Linux and Windows. Contributions and feedback welcome.
+KernelBoost is a hobby project exploring alternatives to tree-based gradient boosting. Currently v0.2.0. Pre-compiled binaries included for Linux and Windows. Contributions and feedback welcome.
 
 ## License
 

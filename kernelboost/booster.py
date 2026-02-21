@@ -20,17 +20,17 @@ class KernelBooster:
         Minimum features per round.
     max_features : int, default=None
         Maximum features per round. If None, uses min(10, n_features).
-    rounds : int, default=None
-        Boosting rounds. Auto-calculated from n_features if None.
+    n_estimators : int, default=None
+        Number of boosting rounds. Auto-calculated from n_features if None.
     subsample_share : float, default=0.5
         Training sample share per round.
     lambda1 : float, default=0.0
         L1 regularization for line search.
     learning_rate : float, default=0.5
-        Learning rate (shrinkage factor) for step sizes. Must be in (0, 1].
-    max_tree_depth : int, default=3
+        Learning rate (shrinkage factor) for line search step sizes. Must be in (0, 1].
+    max_depth : int, default=3
         Maximum depth for kernel trees.
-    max_sample : int, default=10000
+    max_sample : int, default=5000
         Maximum samples per kernel leaf (triggers splits).
     min_sample : int, default=500
         Minimum samples for kernel fitting.
@@ -41,6 +41,8 @@ class KernelBooster:
         Kernel type: 'gaussian' or 'laplace'.
     precision_method : str, default='pilot-cv'
         Precision optimization method.
+    pilot_factor : float, default=3.0
+        Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     search_rounds : int, default=20
         Precision optimization iterations.
     bounds : tuple, default=(0.10, 35.0)
@@ -49,7 +51,7 @@ class KernelBooster:
         Starting precision. 0 means auto.
     sample_share : float, default=1.0
         Share of samples for precision CV.
-    early_stopping_rounds : int, default=20
+    n_iter_no_change : int, default=20
         Rounds without improvement before stopping.
     stopping_threshold : float, default=0.0
         Early stopping threshold for mean |rho| if no validation set provided.
@@ -67,21 +69,22 @@ class KernelBooster:
         feature_list: list = None,
         min_features: int = 1,
         max_features: int = None,
-        rounds: int = None,
+        n_estimators: int = None,
         subsample_share: float = 0.5,
         lambda1: float = 0.0,
         learning_rate: float = 0.5,
-        max_tree_depth: int = 3,
-        max_sample: int = 10000,
+        max_depth: int = 3,
+        max_sample: int = 5000,
         min_sample: int = 500,
         overlap_epsilon: float = 0.05,
         kernel_type: str = 'laplace',
         precision_method: str = 'pilot-cv',
+        pilot_factor: float = 3.0,
         search_rounds: int = 20,
         bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
-        early_stopping_rounds: int = 20,
+        n_iter_no_change: int = 20,
         stopping_threshold: float = 0.0,
         verbose: int = 0,
         use_gpu: bool = False,
@@ -94,21 +97,22 @@ class KernelBooster:
         self.feature_list = feature_list
         self.lambda1 = lambda1
         self.learning_rate = learning_rate
-        self.rounds = rounds
+        self.n_estimators = n_estimators
         self.subsample_share = subsample_share
         self.min_features = min_features
         self.max_features = max_features
-        self.max_tree_depth = max_tree_depth
+        self.max_depth = max_depth
         self.max_sample = max_sample
         self.min_sample = min_sample
         self.overlap_epsilon = overlap_epsilon
         self.kernel_type = kernel_type
         self.precision_method = precision_method
+        self.pilot_factor = pilot_factor
         self.search_rounds = search_rounds
         self.bounds = bounds
         self.initial_precision = initial_precision
         self.sample_share = sample_share
-        self.early_stopping_rounds = early_stopping_rounds
+        self.n_iter_no_change = n_iter_no_change
         self.stopping_threshold = stopping_threshold
 
         self.verbose = verbose
@@ -121,12 +125,13 @@ class KernelBooster:
             'initial_precision': initial_precision,
             'sample_share': sample_share,
             'precision_method': precision_method,
+            'pilot_factor': pilot_factor,
         }
 
         self.tree_optimization = {
             'max_sample': max_sample,
             'min_sample': min_sample,
-            'max_depth': max_tree_depth,
+            'max_depth': max_depth,
             'overlap_epsilon': overlap_epsilon,
         }
 
@@ -144,8 +149,8 @@ class KernelBooster:
             raise ValueError(f"learning_rate must be in (0, 1], got {self.learning_rate}")
         if not 0 < self.subsample_share <= 1:
             raise ValueError(f"subsample_share must be in (0, 1], got {self.subsample_share}")
-        if self.rounds is not None and self.rounds <= 0:
-            raise ValueError(f"rounds must be > 0, got {self.rounds}")
+        if self.n_estimators is not None and self.n_estimators <= 0:
+            raise ValueError(f"n_estimators must be > 0, got {self.n_estimators}")
         if self.stopping_threshold < 0:
             raise ValueError(f"stopping_threshold must be >= 0, got {self.stopping_threshold}")
         if len(self.bounds) != 2 or self.bounds[0] >= self.bounds[1]:
@@ -154,8 +159,8 @@ class KernelBooster:
             raise ValueError(f"min_features must be >= 1, got {self.min_features}")
         if self.max_features is not None and self.max_features < self.min_features:
             raise ValueError(f"max_features ({self.max_features}) must be >= min_features ({self.min_features})")
-        if self.early_stopping_rounds is not None and self.early_stopping_rounds <= 0:
-            raise ValueError(f"early_stopping_rounds must be a positive integer or None, got {self.early_stopping_rounds}")
+        if self.n_iter_no_change is not None and self.n_iter_no_change <= 0:
+            raise ValueError(f"n_iter_no_change must be a positive integer or None, got {self.n_iter_no_change}")
         if not (0.0 <= self.overlap_epsilon < 0.5):
             raise ValueError(f"overlap_epsilon must be in [0.0, 0.5), got {self.overlap_epsilon}")
 
@@ -210,8 +215,8 @@ class KernelBooster:
             Sample weights for weighted training.
         eval_set : tuple of (X_val, y_val), optional
             Validation set for early stopping. When provided together with
-            early_stopping_rounds, training will stop if the validation score
-            doesn't improve for early_stopping_rounds consecutive iterations.
+            n_iter_no_change, training will stop if the validation score
+            doesn't improve for n_iter_no_change consecutive iterations.
 
         Returns:
         self : KernelBooster
@@ -241,10 +246,10 @@ class KernelBooster:
 
         self._set_sampling_weights(sample_weight)
 
-        if self.rounds is None:
-            self.rounds_ = self.n_features_in_ * 15
+        if self.n_estimators is None:
+            self.n_estimators_ = self.n_features_in_ * 15
         else:
-            self.rounds_ = self.rounds
+            self.n_estimators_ = self.n_estimators
 
         if self.max_features is None:
             self.max_features_ = min(10, self.n_features_in_)
@@ -278,7 +283,7 @@ class KernelBooster:
         if self.verbose > 0:
             print("Training.")
 
-        for m in range(self.rounds_):
+        for m in range(self.n_estimators_):
             self._train_single_round(m)
             self._log_round(m, self.fitted_features_[-1])
 
@@ -300,7 +305,7 @@ class KernelBooster:
 
         # priority: explicit feature_list > feature_selector > default random
         if self.feature_list is not None:
-            self.rounds_ = len(self.feature_list)
+            self.n_estimators_ = len(self.feature_list)
             self.feature_list_ = self.feature_list
             self._use_selector = False
         else:
@@ -311,13 +316,13 @@ class KernelBooster:
                 selector = RandomSelector()
                 self.feature_selector = selector
 
-            self.rounds_ = selector.initialize(
+            self.n_estimators_ = selector.initialize(
                 self.X_, self.n_features_in_,
-                self.min_features, self.max_features_, self.rounds_
+                self.min_features, self.max_features_, self.n_estimators_
             )
             self._use_selector = True
             if self.verbose > 0:
-                print(f"Feature selector initialized: {self.rounds_} rounds")
+                print(f"Feature selector initialized: {self.n_estimators_} rounds")
 
         self.y_mean_ = np.mean(self.y_)
         if self.objective.is_classifier:
@@ -422,14 +427,14 @@ class KernelBooster:
         
     def _should_stop(self, m: int) -> bool:
         """Check if training should stop."""
-        if m >= self.rounds_:
+        if m >= self.n_estimators_:
             return True
 
         # validation-based
         if self._eval_X is not None:
             if self._check_validation_stopping(m):
                 if self.verbose > 0:
-                    print(f"Early stopping: validation loss did not improve for {self.early_stopping_rounds} rounds.")
+                    print(f"Early stopping: validation loss did not improve for {self.n_iter_no_change} rounds.")
                 self.stopped_early_ = True
                 return True
             return False
@@ -465,12 +470,12 @@ class KernelBooster:
         if self.verbose > 0:
             print(f"Validation loss: {val_loss:.5f} (best: {self._best_val_loss:.5f} at round {self._best_round + 1})")
 
-        return self._rounds_no_improvement >= self.early_stopping_rounds
+        return self._rounds_no_improvement >= self.n_iter_no_change
 
     def _check_rho_stopping(self, m: int) -> bool:
         """Check if training should stop based on rho heuristic."""
-        if m >= self.early_stopping_rounds:
-            mean_rho = np.mean(np.abs(self.rho_[-self.early_stopping_rounds:]))
+        if m >= self.n_iter_no_change:
+            mean_rho = np.mean(np.abs(self.rho_[-self.n_iter_no_change:]))
             if mean_rho < self.stopping_threshold:
                 return True
         return False
@@ -718,14 +723,14 @@ class KernelBooster:
             'feature_names': self.feature_names,
             'feature_list': self.feature_list,
             'feature_selector': self.feature_selector,
-            'max_tree_depth': self.max_tree_depth,
+            'max_depth': self.max_depth,
             'max_sample': self.max_sample,
             'min_sample': self.min_sample,
             'use_gpu': self.use_gpu,
             'kernel_type': self.kernel_type,
             'lambda1': self.lambda1,
             'learning_rate': self.learning_rate,
-            'rounds': self.rounds,
+            'n_estimators': self.n_estimators,
             'verbose': self.verbose,
             'search_rounds': self.search_rounds,
             'bounds': self.bounds,
@@ -736,7 +741,7 @@ class KernelBooster:
             'stopping_threshold': self.stopping_threshold,
             'min_features': self.min_features,
             'max_features': self.max_features,
-            'early_stopping_rounds': self.early_stopping_rounds,
+            'n_iter_no_change': self.n_iter_no_change,
             'overlap_epsilon': self.overlap_epsilon,
         }
 
@@ -761,7 +766,7 @@ class KernelBooster:
         self.tree_optimization = {
             'max_sample': self.max_sample,
             'min_sample': self.min_sample,
-            'max_depth': self.max_tree_depth,
+            'max_depth': self.max_depth,
             'overlap_epsilon': self.overlap_epsilon,
         }
 

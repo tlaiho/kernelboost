@@ -62,14 +62,14 @@ if __name__ == "__main__":
         feature_selector=selector,
         max_sample=4000,
         min_sample=750,
-        rounds=250,
+        n_estimators=250,
         subsample_share=0.8,
         lambda1=0.0002,
         learning_rate=0.8,
         min_features=1,
         max_features=5,
         overlap_epsilon=0.05,
-        early_stopping_rounds=30,
+        n_iter_no_change=30,
         verbose=0,
     )
 

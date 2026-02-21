@@ -69,7 +69,7 @@ if __name__ == "__main__":
         objective=EntropyObjective(),
         max_sample=350,
         min_sample=80,
-        rounds=100,
+        n_estimators=100,
         subsample_share=0.85,
         lambda1=0.0002,
         learning_rate=0.85,

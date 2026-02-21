@@ -126,9 +126,9 @@ class KernelTree:
     whether numerical features present.
 
     Args:
-    min_sample : int, default=3000
+    min_sample : int, default=500
         Minimum samples required for a kernel leaf.
-    max_sample : int, default=8000
+    max_sample : int, default=5000
         Maximum samples before forcing a split on numerical features.
     max_depth : int, default=3
         Maximum depth for categorical splits.
@@ -152,12 +152,14 @@ class KernelTree:
         Fraction of data to use for precision optimization.
     precision_method : str, default='pilot-cv'
         Precision selection method: 'search' (LOO-CV) or 'silverman'.
+    pilot_factor : float, default=3.0
+        Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     """
 
     def __init__(
         self,
-        min_sample: int = 3000,
-        max_sample: int = 8000,
+        min_sample: int = 500,
+        max_sample: int = 5000,
         max_depth: int = 3,
         feature_types: dict = None,
         overlap_epsilon: float = 0.05,
@@ -168,6 +170,7 @@ class KernelTree:
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
         precision_method: str = 'pilot-cv',
+        pilot_factor: float = 3.0,
     ):
 
         self.min_sample = min_sample
@@ -182,6 +185,7 @@ class KernelTree:
         self.initial_precision = initial_precision
         self.sample_share = sample_share
         self.precision_method = precision_method
+        self.pilot_factor = pilot_factor
 
         self.kernel_optimization = {
             'kernel_type': kernel_type,
@@ -190,6 +194,7 @@ class KernelTree:
             'initial_precision': initial_precision,
             'sample_share': sample_share,
             'precision_method': precision_method,
+            'pilot_factor': pilot_factor,
         }
 
         self._validate_params()

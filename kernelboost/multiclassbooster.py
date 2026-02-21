@@ -29,19 +29,19 @@ class MulticlassBooster:
         Minimum features per round.
     max_features : int, default=None
         Maximum features per round. If None, uses min(10, n_features).
-    rounds : int or None, default=None
-        Boosting rounds. Auto-calculated from n_features if None.
+    n_estimators : int or None, default=None
+        Number of boosting rounds. Auto-calculated from n_features if None.
     subsample_share : float, default=0.5
         Training sample share per round.
     lambda1 : float, default=0.0005
         L1 regularization for line search.
     learning_rate : float, default=0.1
-        Learning rate (shrinkage factor) for step sizes. Must be in (0, 1].
-    max_tree_depth : int, default=3
+        Learning rate (shrinkage factor) for line search step sizes. Must be in (0, 1].
+    max_depth : int, default=3
         Maximum depth for kernel trees.
-    max_sample : int, default=10000
+    max_sample : int, default=5000
         Maximum samples per kernel leaf (triggers splits).
-    min_sample : int, default=1000
+    min_sample : int, default=500
         Minimum samples for kernel fitting.
     overlap_epsilon : float, default=0.0
         Overlap epsilon for kernel tree splits.
@@ -52,13 +52,15 @@ class MulticlassBooster:
     precision_method : str, default='pilot-cv'
         Precision selection method: 'pilot-cv' (pilot bounds + LOO-CV),
         'search' (LOO-CV with fixed bounds), or 'silverman' (rule-of-thumb).
+    pilot_factor : float, default=3.0
+        Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     bounds : tuple, default=(0.20, 35.0)
         Precision search bounds.
     initial_precision : float, default=0.0
         Starting precision. 0 means auto.
     sample_share : float, default=1.0
         Share of samples for precision CV.
-    early_stopping_rounds : int, default=20
+    n_iter_no_change : int, default=20
         Stop training if validation score doesn't improve for this many
         consecutive rounds. Only used when eval_set is provided to fit().
     stopping_threshold : float, default=0.0
@@ -77,21 +79,22 @@ class MulticlassBooster:
         feature_names: list | dict | None = None,
         min_features: int = 1,
         max_features: int = None,
-        rounds: int | None = None,
+        n_estimators: int | None = None,
         subsample_share: float = 0.5,
         lambda1: float = 0.0005,
         learning_rate: float = 0.1,
-        max_tree_depth: int = 3,
-        max_sample: int = 10000,
-        min_sample: int = 1000,
+        max_depth: int = 3,
+        max_sample: int = 5000,
+        min_sample: int = 500,
         overlap_epsilon: float = 0.0,
         kernel_type: str = 'laplace',
         precision_method: str = 'pilot-cv',
+        pilot_factor: float = 3.0,
         search_rounds: int = 20,
         bounds: tuple = (0.20, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
-        early_stopping_rounds: int = 20,
+        n_iter_no_change: int = 20,
         stopping_threshold: float = 0.0,
         verbose: int = 1,
         use_gpu: bool = True,
@@ -104,12 +107,12 @@ class MulticlassBooster:
         self.min_features = min_features
         self.max_features = max_features
 
-        self.rounds = rounds
+        self.n_estimators = n_estimators
         self.subsample_share = subsample_share
         self.lambda1 = lambda1
         self.learning_rate = learning_rate
 
-        self.early_stopping_rounds = early_stopping_rounds
+        self.n_iter_no_change = n_iter_no_change
         self.stopping_threshold = stopping_threshold
 
         self.verbose = verbose
@@ -118,6 +121,7 @@ class MulticlassBooster:
         self.kernel_optimization = {
             'kernel_type': kernel_type,
             'precision_method': precision_method,
+            'pilot_factor': pilot_factor,
             'search_rounds': search_rounds,
             'bounds': bounds,
             'initial_precision': initial_precision,
@@ -125,7 +129,7 @@ class MulticlassBooster:
         }
 
         self.tree_optimization = {
-            'max_tree_depth': max_tree_depth,
+            'max_depth': max_depth,
             'max_sample': max_sample,
             'min_sample': min_sample,
             'overlap_epsilon': overlap_epsilon,
@@ -155,8 +159,8 @@ class MulticlassBooster:
         if not 0 < self.subsample_share <= 1:
             raise ValueError(f"subsample_share must be in (0, 1], got {self.subsample_share}")
 
-        if self.rounds is not None and self.rounds <= 0:
-            raise ValueError(f"rounds must be > 0, got {self.rounds}")
+        if self.n_estimators is not None and self.n_estimators <= 0:
+            raise ValueError(f"n_estimators must be > 0, got {self.n_estimators}")
 
         if self.stopping_threshold < 0:
             raise ValueError(f"stopping_threshold must be >= 0, got {self.stopping_threshold}")
@@ -345,10 +349,10 @@ class MulticlassBooster:
         feature_indices_dict = self._setup_feature_indices()
         feature_names_dict = self._setup_feature_names()
 
-        if self.rounds is None:
-            rounds_ = self.n_features_in_ * 15
+        if self.n_estimators is None:
+            n_estimators_ = self.n_features_in_ * 15
         else:
-            rounds_ = self.rounds
+            n_estimators_ = self.n_estimators
 
         self.boosters_ = []
 
@@ -368,13 +372,13 @@ class MulticlassBooster:
                 feature_selector=self.feature_selector,
                 min_features=self.min_features,
                 max_features=self.max_features,
-                rounds=rounds_,
+                n_estimators=n_estimators_,
                 subsample_share=self.subsample_share,
                 lambda1=self.lambda1,
                 learning_rate=self.learning_rate,
                 **self.tree_optimization,
                 **self.kernel_optimization,
-                early_stopping_rounds=self.early_stopping_rounds,
+                n_iter_no_change=self.n_iter_no_change,
                 stopping_threshold=self.stopping_threshold,
                 verbose=self.verbose,
                 use_gpu=self.use_gpu,
@@ -472,7 +476,7 @@ class MulticlassBooster:
             'min_features': self.min_features,
             'max_features': self.max_features,
             # Boosting params
-            'rounds': self.rounds,
+            'n_estimators': self.n_estimators,
             'subsample_share': self.subsample_share,
             'lambda1': self.lambda1,
             'learning_rate': self.learning_rate,
@@ -481,7 +485,7 @@ class MulticlassBooster:
             # Kernel params
             **self.kernel_optimization,
             # Early stopping
-            'early_stopping_rounds': self.early_stopping_rounds,
+            'n_iter_no_change': self.n_iter_no_change,
             'stopping_threshold': self.stopping_threshold,
             # General
             'verbose': self.verbose,

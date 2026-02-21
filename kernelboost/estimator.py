@@ -22,8 +22,10 @@ class KernelEstimator:
     sample_share : float, default=1.0
         Fraction of data to use for precision optimization (for large datasets).
     precision_method : str, default='pilot-cv'
-        Precision selection method: 'search' (LOO-CV) 'pilot-CV' (bounds for pilot, then LOO-CV) 
+        Precision selection method: 'search' (LOO-CV) 'pilot-CV' (bounds for pilot, then LOO-CV)
         or 'silverman' (rule-of-thumb for testing).
+    pilot_factor : float, default=3.0
+        Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     seed : int, default=None
         Random seed for reproducibility when subsampling during precision optimization.
     """
@@ -37,6 +39,7 @@ class KernelEstimator:
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
         precision_method: str = 'pilot-cv',
+        pilot_factor: float = 3.0,
         seed: int = None,
     ):
         if kernel_type not in {'gaussian', 'laplace'}:
@@ -49,6 +52,7 @@ class KernelEstimator:
         self.initial_precision = initial_precision
         self.sample_share = sample_share
         self.precision_method = precision_method
+        self.pilot_factor = pilot_factor
         self.seed = seed
 
         self.kernel_optimization = {
@@ -58,6 +62,7 @@ class KernelEstimator:
             'initial_precision': initial_precision,
             'sample_share': sample_share,
             'precision_method': precision_method,
+            'pilot_factor': pilot_factor,
         }
 
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -106,7 +111,7 @@ class KernelEstimator:
 
         if self.precision_method == 'pilot-cv':
             self.kernel_optimization['bounds'] = estimate_bounds(
-                X, y, self.kernel_type, self.bounds)
+                X, y, self.kernel_type, self.bounds, self.pilot_factor)
             self.kernel_optimization['precision_method'] = 'search'
 
         if self.use_gpu:
@@ -170,6 +175,7 @@ class KernelEstimator:
             'initial_precision': self.initial_precision,
             'sample_share': self.sample_share,
             'precision_method': self.precision_method,
+            'pilot_factor': self.pilot_factor,
             'seed': self.seed,
         }
 

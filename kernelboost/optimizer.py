@@ -1,4 +1,4 @@
-"""Simple search based optimization functions."""
+"""Simple search based optimization functions and pilot function estimation."""
 
 import numpy as np
 from typing import Callable, Tuple
@@ -157,8 +157,7 @@ def estimate_bounds(
         t_dependent: np.ndarray,
         kernel_type: str,
         bounds: tuple = (0.10, 35.0),
-        c_low: float = 0.2,
-        c_high: float = 4.25,
+        factor: float = 3.0,
         ) -> tuple:
     """Estimate bounds for precision using a polynomial pilot and AMISE formula."""
 
@@ -172,7 +171,7 @@ def estimate_bounds(
     design_matrix = np.column_stack([np.ones(n), t_features, t_features**2, t_features**3])
     coeffs, _, _, _ = np.linalg.lstsq(design_matrix, y, rcond=None)
     residuals = y - design_matrix @ coeffs
-    sigma_sq = np.var(residuals)
+    sigma_sq = np.sum(residuals**2) / max(n - 3*d - 1, 1)
 
     if sigma_sq < 1e-20:
         return bounds
@@ -202,20 +201,19 @@ def estimate_bounds(
     h_opts = C * n ** (-1.0 / (d + 4))
     h_opt = float(np.median(h_opts))
 
-    # Convert bandwidth to precision
+    # convert bandwidth to precision
     if kernel_type == "gaussian":
         p = 1.0 / h_opt**2
     elif kernel_type == "laplace":
         p = 1.0 / h_opt
 
-    lower = max(c_low * p, bounds[0])
-    upper = min(c_high * p, bounds[1])
+    lower = max(p / factor, bounds[0])
+    upper = min(p * factor, bounds[1])
 
-    if lower >= upper:
+    if h_opt < 1e-5 or upper - lower <= 0.1:
         return bounds
 
     return (lower, upper)
-
 
 
 def silverman_precision(t_features: np.ndarray, scale: float = 10.0) -> np.ndarray:
