@@ -58,10 +58,10 @@ class MulticlassBooster:
         Starting precision. 0 means auto.
     sample_share : float, default=1.0
         Share of samples for precision CV.
-    early_stopping_rounds : int, default=5
+    early_stopping_rounds : int, default=20
         Stop training if validation score doesn't improve for this many
         consecutive rounds. Only used when eval_set is provided to fit().
-    stopping_threshold : float, default=0.001
+    stopping_threshold : float, default=0.0
         Early stopping threshold for mean |rho|.
     verbose : int, default=1
         Verbosity level. 0 = silent, 1 = progress.
@@ -91,8 +91,8 @@ class MulticlassBooster:
         bounds: tuple = (0.20, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
-        early_stopping_rounds: int = 5,
-        stopping_threshold: float = 0.001,
+        early_stopping_rounds: int = 20,
+        stopping_threshold: float = 0.0,
         verbose: int = 1,
         use_gpu: bool = True,
     ):
