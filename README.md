@@ -7,7 +7,7 @@
 ![C](https://img.shields.io/badge/C-language-blue)
 ![GPU](https://img.shields.io/badge/GPU-CUDA%20C%2FCuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.1-blue)
 
 kernelboost is a gradient boosting algorithm that uses Nadaraya-Watson (local constant) kernel estimators as base learners instead of decision trees. It has:
 
@@ -274,7 +274,7 @@ All benchmarks run on Ubuntu 22.04 with Ryzen 7700 and RTX 3090.
 
 ## About
 
-kernelboost is a hobby project exploring alternatives to tree-based gradient boosting. Currently v0.2.0. Pre-compiled binaries included for Linux and Windows. Contributions and feedback welcome.
+kernelboost is a hobby project exploring alternatives to tree-based gradient boosting. Currently v0.2.1. Pre-compiled binaries included for Linux and Windows. Contributions and feedback welcome.
 
 ## License
 
