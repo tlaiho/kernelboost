@@ -63,7 +63,7 @@ After calling fit, KernelBooster starts a training loop which is mostly identica
 
 KernelTree splits numerical data by density and categorical data by MSE. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a whopping 90% of compute.
 
-The actual estimation is handled by KernelEstimator. It optimizes a scalar precision (inverse bandwidth) for the local constant estimator using leave-one-out cross validation and random search between given bounds. It has both Gaussian and (isotropic) Laplace kernels with default being the Laplace kernel. KernelEstimator also has uncertainty quantification methods for quantile and conditional variance prediction, but these are at this moment still experimental as they use a "naive" single kernel method whose precision is optimized for mean prediction.
+The actual estimation is handled by KernelEstimator. It optimizes a scalar precision (inverse bandwidth) for the local constant estimator using leave-one-out cross validation and random search between given bounds. It has both Gaussian and (isotropic) Laplace kernels with default being the Laplace kernel. KernelEstimator also has uncertainty quantification methods for quantile and conditional variance prediction (Fan & Yao 1998).
 
 ### Notable features 
 
@@ -113,7 +113,7 @@ lambda1, learning_rate = opt.find_hyperparameters()
 
 #### Uncertainty Quantification (Experimental)
 
-KernelBooster has both prediction intervals and conditional variance prediction based on kernel estimation. These come for "free" on top of training and require no extra data. Still work in progress.
+KernelBooster has both prediction intervals and conditional variance prediction (Fan & Yao 1998) based on kernel estimation. These come for "free" on top of training and require no extra data. Still work in progress.
 
 ```python
 # Prediction intervals (90% by default)
@@ -223,10 +223,10 @@ Kernel Methods Benchmark (n_train=10000)
 =================================================================
 Model                       MSE        MAE         R²       Time
 -----------------------------------------------------------------
-kernelboost              0.2091     0.3054     0.8430       6.5s
-KernelRidge              0.4233     0.4835     0.6822       1.7s
-SVR                      0.3136     0.3780     0.7646       3.5s
-GP (n=5000)              0.3297     0.4061     0.7524      67.7s
+KernelBoost              0.2117     0.3077     0.8451       5.3s
+KernelRidge              0.4399     0.4903     0.6783       1.6s
+SVR                      0.3151     0.3794     0.7695       3.4s
+GP (n=5000)              0.3344     0.4093     0.7554      72.3s
 =================================================================
 ```
 
@@ -237,10 +237,10 @@ Prediction intervals and conditional variance estimates compared to Gaussian Pro
 =================================================================
 Uncertainty Quantification (90% intervals, alpha=0.1)
 =================================================================
-Model                  Coverage    Width    Var Corr   Var Ratio
+Model                  Coverage    Width   Var Corr   Var Ratio
 -----------------------------------------------------------------
-kernelboost              88.1%    1.235      0.206       1.621
-GP (n=5000)              90.9%    1.863      0.157       1.026
+KernelBoost              85.1%    1.134      0.261       1.313
+GP (n=5000)              90.6%    1.827      0.168       1.082
 =================================================================
 ```
 
