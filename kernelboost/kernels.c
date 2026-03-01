@@ -3,7 +3,7 @@
 #include <math.h>
 #include <omp.h>
 
-// C code for CPU kernel operations (float32 for GPU consistency)
+// C code for CPU kernel operations (float32 for consistency with GPU)
 
 // kernel type constants: 0 = gaussian, 1 = laplace
 static inline float gaussian_weight(float sq_diff, float precision) {
@@ -65,8 +65,8 @@ float loo_mse(
     int dimension,
     int kernel_type,
     float mean_y) {
-    // Leave-one-out loss using symmetry of the kernel weights.  
-    // Weights computed with rescaling by 1 - self_weight.
+    // leave-one-out loss using symmetry of the kernel weights.  
+    // weights computed with rescaling by 1 - self_weight.
 
     int n = training_obs;
     size_t tri_size = (size_t)n * (n + 1) / 2;
@@ -159,51 +159,6 @@ void estimate_similarity(
                 ws += w;
             }
             weight_sums[i] = ws;
-        }
-    }
-}
-
-void predict_with_variance(
-    float * predictions,
-    float * variances,
-    float * training_dependent,
-    float * training_features,
-    float * prediction_features,
-    float precision,
-    int training_obs,
-    int prediction_obs,
-    int dimension,
-    int kernel_type) {
-
-    int i;
-
-    #pragma omp parallel
-    {
-        int j, k;
-        float weight_sum, dependent_sum, dependent_sq_sum, sq_diff, w;
-
-        #pragma omp for
-        for (i = 0; i < prediction_obs; i++) {
-            weight_sum = 0;
-            dependent_sum = 0;
-            dependent_sq_sum = 0;
-            for (j = 0; j < training_obs; j++) {
-                sq_diff = 0;
-                for (k = 0; k < dimension; k++) {
-                    float diff = prediction_features[i * dimension + k] - training_features[j * dimension + k];
-                    sq_diff += diff * diff;
-                }
-                if (kernel_type == 0) w = gaussian_weight(sq_diff, precision);
-                else w = laplace_weight(sq_diff, precision);
-                weight_sum += w;
-                dependent_sum += w * training_dependent[j];
-                dependent_sq_sum += w * training_dependent[j] * training_dependent[j];
-            }
-            predictions[i] = (weight_sum > 0) ? dependent_sum / weight_sum : 0.0f;
-            float expected_y_sq = (weight_sum > 0) ? dependent_sq_sum / weight_sum : 0.0f;
-            // Variance: E[Y²|X] - E[Y|X]²
-            variances[i] = expected_y_sq - predictions[i] * predictions[i];
-            if (variances[i] < 0) variances[i] = 0;  // numerical stability
         }
     }
 }

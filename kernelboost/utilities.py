@@ -379,11 +379,7 @@ def permutation_importance(
 class RankTransformer:
     """Transform features to percentile ranks.
 
-    Converts values to their percentile rank within the training distribution.
-    Uses searchsorted for efficient rank computation.
-
-    Parameters
-    ----------
+    Args:
     pct : bool, default=True
         If True, return percentile ranks (0-1 range).
         If False, return raw ranks (0 to n-1).

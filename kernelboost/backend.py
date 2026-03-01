@@ -110,42 +110,6 @@ class Backend:
             return cpu_loo_mse(training_dependent, training_features, precision,
                                self._kernel_type_int, mean_y)
 
-    def predict_with_variance(
-        self,
-        training_dependent: np.ndarray,
-        training_features: np.ndarray,
-        prediction_features: np.ndarray,
-        precision: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        EXPERIMENTAL. Nadaraya-Watson prediction with local variance estimation based on 
-        Var(Y|X) = E[Y²|X] - prediction².
-        Args:
-            training_dependent: (n_train,) or (n_train, 1)
-            training_features: (n_train, n_features)
-            prediction_features: (n_pred, n_features)
-            precision: precision array
-
-        """
-        self._check_memory(
-            prediction_features.shape[0], training_features.shape[0],
-            "predict_with_variance"
-        )
-        if self.use_gpu:
-            from .gpu_functions import cuda_predict_with_variance
-            return cuda_predict_with_variance(
-                training_dependent, training_features,
-                prediction_features, precision,
-                self._kernel_type_int
-            )
-        else:
-            from .cpu_functions import cpu_predict_with_variance
-            return cpu_predict_with_variance(
-                training_dependent, training_features,
-                prediction_features, precision,
-                self._kernel_type_int
-            )
-
     def get_weights(
         self,
         training_features: np.ndarray,

@@ -83,24 +83,6 @@ def cuda_predict(t_dependent: np.ndarray, t_features: np.ndarray, p_features: np
     return cp.asnumpy(predictions)
 
 
-def cuda_predict_with_variance(t_dependent: np.ndarray, t_features: np.ndarray, p_features: np.ndarray, precision: np.ndarray, kernel_type: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    """Predict using Nadaraya-Watson estimator with local variance estimation."""
-    if p_features.shape[0] == 0:
-        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
-    if t_features.shape[0] == 0:
-        return np.full(p_features.shape[0], np.nan, dtype=np.float32), np.full(p_features.shape[0], np.nan, dtype=np.float32)
-
-    k_matrix = _compute_weights(t_features, p_features, precision, kernel_type)
-    c_td = cp.asarray(t_dependent, dtype=cp.float32)
-    predictions = cp.matmul(k_matrix, c_td)
-
-    # Variance: E[Y²|X] - E[Y|X]² = E[Y²|X] - prediction²
-    expected_y_sq = cp.matmul(k_matrix, c_td ** 2)
-    variance = cp.maximum(expected_y_sq - predictions ** 2, 0)
-
-    return cp.asnumpy(predictions), cp.asnumpy(variance)
-
-
 def cuda_loo(t_dependent: np.ndarray,
              t_features: np.ndarray,
              precision: np.ndarray,
@@ -120,7 +102,7 @@ def cuda_loo(t_dependent: np.ndarray,
     # detect bad rows: zero weight or isolated
     diag_indices = cp.arange(t_count)
     diag_weights = k_matrix[diag_indices, diag_indices]
-    bad_weight_mask = (diag_weights == 0) | (diag_weights > 1.0 - 1e-4)
+    bad_weight_mask = diag_weights > 1.0 - 1e-4
 
     predictions = cp.dot(k_matrix, c_td)
 

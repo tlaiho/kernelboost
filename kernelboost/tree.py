@@ -83,40 +83,6 @@ class CompiledTree:
 
         return result
     
-    def _predict_with_variance(
-        self,
-        X: np.ndarray,
-        X_num: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """EXPERIMENTAL. Predict with conditional variance estimates.
-        Constant leaves return variance=0."""
-        n = X.shape[0]
-        predictions = np.zeros((n, 1), dtype=np.float32)
-        variances = np.zeros((n, 1), dtype=np.float32)
-
-        if X_num is None:
-            X_num = np.delete(X, self.categorical, axis=1) if self.categorical else X
-
-        for conds, est, is_kern in zip(self.conditions, self.estimators, self.is_kernel):
-            mask = np.ones(n, dtype=bool)
-            for feat, thresh, direction in conds:
-                if direction == 0: # 0 is smaller or equal than
-                    mask &= X[:, feat] <= thresh
-                else:
-                    mask &= X[:, feat] > thresh
-
-            if not np.any(mask):
-                continue
-
-            if is_kern:
-                pred, var = est._predict_with_variance(X_num[mask])
-                predictions[mask] = pred.reshape(-1, 1)
-                variances[mask] = var.reshape(-1, 1)
-            else:
-                predictions[mask] = est
-                variances[mask] = 0.0
-
-        return predictions, variances
 
 
 class KernelTree:
@@ -250,12 +216,12 @@ class KernelTree:
                     self.numerical_.append(i)
         else:
             for i in range(self.n_features_):
-                sample = self.X_[:min(1000, self.n_samples_), i]
-                n_unique = len(np.unique(sample))
+                sample = self.X_[:min(3000, self.n_samples_), i]
+                _, counts = np.unique(sample, return_counts=True)
+                n_unique = len(counts)
                 if n_unique == 1:
                     warnings.warn(f"Feature {i} is a constant.")
-                # less than 5% unique values: categorical
-                if n_unique < 50:
+                if n_unique < 50 or counts.max() / len(sample) > 0.2:
                     self.categorical_.append(i)
                 else:
                     self.numerical_.append(i)
@@ -429,10 +395,6 @@ class KernelTree:
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using the compiled tree."""
         return self.compiled_.predict(np.asarray(X, dtype=np.float32))
-
-    def _predict_with_variance(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """EXPERIMENTAL. Predict with variance estimates."""
-        return self.compiled_._predict_with_variance(np.asarray(X, dtype=np.float32))
 
     def predict_quantiles(
         self, X: np.ndarray, quantiles: tuple = (0.1, 0.5, 0.9)

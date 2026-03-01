@@ -39,7 +39,7 @@ class MulticlassBooster:
         Learning rate (shrinkage factor) for line search step sizes. Must be in (0, 1].
     max_depth : int, default=3
         Maximum depth for kernel trees.
-    max_sample : int, default=5000
+    max_sample : int, default=4000
         Maximum samples per kernel leaf (triggers splits).
     min_sample : int, default=500
         Minimum samples for kernel fitting.
@@ -84,7 +84,7 @@ class MulticlassBooster:
         lambda1: float = 0.0005,
         learning_rate: float = 0.1,
         max_depth: int = 3,
-        max_sample: int = 5000,
+        max_sample: int = 4000,
         min_sample: int = 500,
         overlap_epsilon: float = 0.0,
         kernel_type: str = 'laplace',
@@ -467,27 +467,20 @@ class MulticlassBooster:
     def get_params(self, deep: bool = True) -> dict:
         """Get parameters for this estimator."""
         return {
-            # Multiclass-specific
             'class_weights': self.class_weights,
             'feature_indices': self.feature_indices,
-            # Feature-related
             'feature_selector': self.feature_selector,
             'feature_names': self.feature_names,
             'min_features': self.min_features,
             'max_features': self.max_features,
-            # Boosting params
             'n_estimators': self.n_estimators,
             'subsample_share': self.subsample_share,
             'lambda1': self.lambda1,
             'learning_rate': self.learning_rate,
-            # Tree params
             **self.tree_optimization,
-            # Kernel params
             **self.kernel_optimization,
-            # Early stopping
             'n_iter_no_change': self.n_iter_no_change,
             'stopping_threshold': self.stopping_threshold,
-            # General
             'verbose': self.verbose,
             'use_gpu': self.use_gpu,
         }

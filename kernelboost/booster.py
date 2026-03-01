@@ -272,7 +272,8 @@ class KernelBooster:
         feature_tuples = (tuple(sublist) for sublist in self.fitted_features_)
         self.rho_dict_ = dict(zip(feature_tuples, self.rho_))
 
-        self.last_active_tree_idx_ = self._last_active_tree_index()
+        indices = self._last_n_active_tree_indices(1)
+        self.last_active_tree_idx_ = indices[0] if indices else None
 
         return self
 
@@ -639,20 +640,19 @@ class KernelBooster:
         self,
         X: np.ndarray,
         n_trees: int = None,
-        aggregation: str = 'mean'
+        aggregation: str = 'max'
     ) -> np.ndarray:
         """
-        EXPERIMENTAL. Predict conditional variance estimates using last active trees.
-        If boosting has converged to E(Y|X) and the conditional variance estimation in
-        KernelEstimator works, this represents aleatoric uncertainty.
+        Predict conditional variance using Fan & Yao (1998) double kernel estimation.
+        Fits dedicated KernelTrees on squared residuals from the booster.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
             Features to predict on.
         n_trees : int, default=None
-            Number of last active trees to use for variance estimation.
+            Number of last active trees whose feature subsets are used.
             If None, uses min(5, number of active trees).
-        aggregation : str, default='mean'
+        aggregation : str, default='max'
             How to combine variances from multiple trees:
             - 'max': maximum variance (most conservative)
             - 'mean': average variance
@@ -670,31 +670,52 @@ class KernelBooster:
         if self.last_active_tree_idx_ is None:
             raise RuntimeError("No active trees found (all rho values are zero)")
 
-        # default: up to 5 trees
         if n_trees is None:
             n_trees = min(5, self.last_active_tree_idx_ + 1)
 
-        tree_indices = self._last_n_active_tree_indices(n_trees)
-
-        if len(tree_indices) == 1:
-            tree = self.trees_[tree_indices[0]]
-            features = self.fitted_features_[tree_indices[0]]
-            _, variance = tree._predict_with_variance(X[:, features])
-            return variance.ravel()
+        # fit variance trees on first call
+        if not hasattr(self, 'variance_trees_') or self.variance_trees_ is None:
+            self._fit_variance_trees(n_trees)
 
         n_samples = X.shape[0]
-        variances = np.zeros((len(tree_indices), n_samples))
+        variances = np.zeros((len(self.variance_trees_), n_samples))
 
-        for i, idx in enumerate(tree_indices):
-            tree = self.trees_[idx]
-            features = self.fitted_features_[idx]
-            _, var = tree._predict_with_variance(X[:, features])
-            variances[i] = var.ravel()
+        for i, (vtree, features) in enumerate(
+            zip(self.variance_trees_, self.variance_features_)
+        ):
+            variances[i] = vtree.predict(X[:, features]).ravel()
+
+        if len(self.variance_trees_) == 1:
+            return np.maximum(variances[0], 0.0)
 
         if aggregation == 'max':
-            return np.max(variances, axis=0)
+            return np.maximum(np.max(variances, axis=0), 0.0)
         else:
-            return np.mean(variances, axis=0)
+            return np.maximum(np.mean(variances, axis=0), 0.0)
+
+    def _fit_variance_trees(self, n_trees: int) -> None:
+        """Fit KernelTrees on squared residuals for Fan & Yao variance estimation."""
+        residuals = self.y_.ravel() - self.predict(self.X_).ravel()
+        squared_residuals = residuals ** 2
+
+        tree_indices = self._last_n_active_tree_indices(n_trees)
+
+        self.variance_trees_ = []
+        self.variance_features_ = []
+
+        for idx in tree_indices:
+            features = self.fitted_features_[idx]
+            var_tree = KernelTree(
+                **self.tree_optimization,
+                use_gpu=self.use_gpu,
+                **self.kernel_optimization,
+            )
+            var_tree.fit(
+                self.X_[:, features],
+                squared_residuals.reshape(-1, 1),
+            )
+            self.variance_trees_.append(var_tree)
+            self.variance_features_.append(features)
 
     def _last_n_active_tree_indices(self, n: int) -> list[int]:
         """Find indices of last n trees with non-zero rho."""
@@ -783,10 +804,12 @@ class KernelBooster:
 
         self.use_gpu = value
 
-    def _last_active_tree_index(self) -> int | None:
-        """Find index of last tree with non-zero rho."""
-        indices = self._last_n_active_tree_indices(1)
-        return indices[0] if indices else None
+        if hasattr(self, 'variance_trees_') and self.variance_trees_ is not None:
+            for vtree in self.variance_trees_:
+                for est, is_kern in zip(vtree.compiled_.estimators, vtree.compiled_.is_kernel):
+                    if is_kern:
+                        est.use_gpu = value
+
 
     @property
     def feature_importances_(self) -> np.ndarray:

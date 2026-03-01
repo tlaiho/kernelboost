@@ -19,7 +19,14 @@ else:
     raise Exception(f"Platform '{system}' not supported for CPU, try using GPU.")
 
 # Load functions from C library (all float32 for GPU consistency)
-clib = ctypes.CDLL(libname)
+try:
+    clib = ctypes.CDLL(libname)
+except OSError:
+    raise OSError(
+        f"Could not load C library at {libname}. "
+        f"Compile it with: gcc -shared -o {libname} -fPIC kernelboost/kernels.c "
+        f"-lm -fopenmp -O3 -march=native -ffast-math -funroll-loops -flto"
+    )
 clib.predict.restype = None
 clib.predict.argtypes = (
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # predictions
@@ -42,20 +49,6 @@ clib.loo_mse.argtypes = (
     ctypes.c_int,     # dimension
     ctypes.c_int,     # kernel_type
     ctypes.c_float,   # mean_y
-    )
-
-clib.predict_with_variance.restype = None
-clib.predict_with_variance.argtypes = (
-    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # predictions
-    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # variances
-    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # training_dependent
-    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # training_features
-    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # prediction_features
-    ctypes.c_float,   # precision
-    ctypes.c_int,     # training_obs
-    ctypes.c_int,     # prediction_obs
-    ctypes.c_int,     # dimension
-    ctypes.c_int,     # kernel_type
     )
 
 clib.get_weights.restype = None
@@ -147,46 +140,10 @@ def cpu_loo_mse(
         ctypes.c_float(mean_y),
     )
 
+    if result < 0:
+        raise MemoryError("C library failed to allocate memory for LOO-CV computation.")
+
     return float(result)
-
-
-def cpu_predict_with_variance(
-        training_dependent: np.ndarray,
-        training_features: np.ndarray,
-        prediction_features: np.ndarray,
-        precision: np.ndarray,
-        kernel_type: int = 0,
-        ) -> tuple[np.ndarray, np.ndarray]:
-    """Predict Nadaraya-Watson estimator with local variance estimation."""
-
-    if prediction_features.shape[0] == 0:
-        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
-    if training_features.shape[0] == 0:
-        return np.full(prediction_features.shape[0], np.nan, dtype=np.float32), np.full(prediction_features.shape[0], np.nan, dtype=np.float32)
-
-    training_obs = training_dependent.shape[0]
-    prediction_obs = prediction_features.shape[0]
-    dimension = training_features.shape[1]
-    predictions = np.zeros(prediction_obs, dtype=np.float32)
-    variances = np.zeros(prediction_obs, dtype=np.float32)
-
-    training_features_1d = np.ravel(training_features).astype(np.float32)
-    prediction_features_1d = np.ravel(prediction_features).astype(np.float32)
-
-    clib.predict_with_variance(
-        predictions,
-        variances,
-        np.ascontiguousarray(training_dependent.astype(np.float32)),
-        np.ascontiguousarray(training_features_1d),
-        np.ascontiguousarray(prediction_features_1d),
-        ctypes.c_float(precision[0]),
-        ctypes.c_int(training_obs),
-        ctypes.c_int(prediction_obs),
-        ctypes.c_int(dimension),
-        ctypes.c_int(kernel_type),
-    )
-
-    return predictions, variances
 
 
 def cpu_get_weights(

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-03-01
+
+### Changed
+- Replaced built-in variance estimation with Fan & Yao (1998) double kernel method. `predict_variance()` now fits dedicated KernelTrees on squared residuals instead of reusing mean-optimized kernel weights. Default aggregation changed from `'mean'` to `'max'`.
+- Small bug fixes. 
+
+### Removed
+- Removed `_predict_with_variance()` from KernelEstimator, KernelTree, CompiledTree, and Backend.
+- Removed `cuda_predict_with_variance()` and `cpu_predict_with_variance()` backend functions.
+- Removed `predict_with_variance` C function from `kernels.c`.
+
 ## [0.2.0] - 2026-02-21
 
 ### Changed

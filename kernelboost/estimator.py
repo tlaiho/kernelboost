@@ -244,26 +244,3 @@ class KernelEstimator:
 
         return result
 
-
-    def _predict_with_variance(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """
-        EXPERIMENTAL. Predict with local variance estimation. Variance estimation uses
-        a single-kernel approach (and local constant regression) instead of the
-        two-step procedure with residuals (and local linear regression) in Fan and Yao (1998).
-        Computationally cheaper, but variance estimates are distorted upwards by bias
-        unless E(Y|X) is precise. A special case is when E(Y|X) = 0 for all X, then
-        the approach effectively collapses to Fan and Yao (1998).
-
-        Args:
-        X : np.ndarray
-            Features, shape (n_samples, n_features).
-
-        Returns:
-        predictions : np.ndarray, shape (n_samples,)
-        variances : np.ndarray, shape (n_samples,)
-        """
-        if not hasattr(self, 'precision_'):
-            raise RuntimeError("Estimator not fitted. Call fit() first.")
-        return self._backend.predict_with_variance(
-            self.y_, self.X_, X, self.precision_
-        )
