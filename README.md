@@ -25,7 +25,7 @@ pip install kernelboost
 pip install cupy-cuda12x  # for CUDA 12
 ```
 
-> **Dependencies**: NumPy only. CuPy optional for GPU acceleration.
+> **Dependencies**: NumPy. CuPy optional for GPU acceleration.
 
 ## Quick Start
 
@@ -67,7 +67,7 @@ The actual estimation is handled by KernelEstimator. It optimizes a scalar preci
 
 ### Notable features 
 
-Beyond the core boosting algorithm, kernelboost includes a few features worth highlighting:
+Beyond the core boosting algorithm, a few features worth highlighting:
 
 #### Smart Feature Selection
 

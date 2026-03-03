@@ -87,9 +87,8 @@ class CompiledTree:
 
 class KernelTree:
     """
-    Decision tree that splits numerical features by density, categorical by MSE gain.
-    Leaf nodes contain KernelEstimators or constants depending on sample size and
-    whether numerical features present.
+    Decision tree that splits either by density (for kernel leaves) or by MSE gain
+    (categorical features or constant leaves).
 
     Args:
     min_sample : int, default=500
@@ -120,6 +119,13 @@ class KernelTree:
         Precision selection method: 'search' (LOO-CV) or 'silverman'.
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
+    tree_type : str, default='kernel'
+        Leaf node type: 'kernel' for kernel estimation or 'constant' for constant leaves.
+    gain_threshold : float, default=1e-3
+        Minimum MSE gain required for a split in constant leaf mode.
+    quantiles : list, optional
+        Split candidate quantiles for constant leaf mode.
+        If None, defaults to linspace(0.01, 0.99, 99).
     """
 
     def __init__(
@@ -130,13 +136,16 @@ class KernelTree:
         feature_types: dict = None,
         overlap_epsilon: float = 0.05,
         use_gpu: bool = False,
-        kernel_type: str = 'gaussian',
+        kernel_type: str = 'laplace',
         search_rounds: int = 20,
         bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
         precision_method: str = 'pilot-cv',
         pilot_factor: float = 3.0,
+        tree_type: str = 'kernel',
+        gain_threshold: float = 1e-3,
+        quantiles: list = None,
     ):
 
         self.min_sample = min_sample
@@ -152,6 +161,13 @@ class KernelTree:
         self.sample_share = sample_share
         self.precision_method = precision_method
         self.pilot_factor = pilot_factor
+        self.tree_type = tree_type
+        self.gain_threshold = gain_threshold
+
+        if quantiles is None:
+            self.quantiles = np.linspace(0.01, 0.99, 99)
+        else:
+            self.quantiles = quantiles
 
         self.kernel_optimization = {
             'kernel_type': kernel_type,
@@ -162,6 +178,10 @@ class KernelTree:
             'precision_method': precision_method,
             'pilot_factor': pilot_factor,
         }
+
+        # min sample decreased, depth increase for non-kernel trees
+        self._const_min_sample = max(50, self.min_sample // 5)
+        self._const_max_depth = self.max_depth + 3
 
         self._validate_params()
 
@@ -180,30 +200,35 @@ class KernelTree:
                 raise ValueError(f"feature_types values must be 'C' or 'N', got invalid keys: {invalid}")
         if not (0.0 <= self.overlap_epsilon < 0.5):
             raise ValueError("overlap_epsilon must be in [0.0, 0.5)")
+        if self.tree_type not in {'kernel', 'constant'}:
+            raise ValueError(f"tree_type must be 'kernel' or 'constant', got '{self.tree_type}'")
+        if self.gain_threshold < 0:
+            raise ValueError(f"gain_threshold must be >= 0, got {self.gain_threshold}")
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "KernelTree":
         """Fit the tree to training data."""
         self.X_ = X.astype(np.float32)
         self.y_ = y.astype(np.float32).ravel()
         self.n_samples_, self.n_features_ = X.shape
-        self.feature_ranges_ = self.X_.max(axis=0) - self.X_.min(axis=0)
-        self._detect_types()
 
-        self.root_ = self._grow_numerical(self.X_, self.y_)
-        if self.categorical_:
-            self.root_ = self._expand_categorical(self.root_, self.X_, self.y_)
+        if self.tree_type == 'constant':
+            self.categorical_ = []
+            self.numerical_ = list(range(self.n_features_))
+            self._use_kernel = False
+            # uses indices rather than values:
+            sorted_by_feat = [np.argsort(self.X_[:, f]) for f in range(self.n_features_)]
+            self.root_ = self._grow_constant(sorted_by_feat)
+        else:
+            self.feature_ranges_ = self.X_.max(axis=0) - self.X_.min(axis=0)
+            self._detect_types()
+            self.root_ = self._grow_numerical(self.X_, self.y_)
+            if self.categorical_:
+                self.root_ = self._expand_categorical(self.root_, self.X_, self.y_)
+
         self.compiled_ = self._compile(self.root_)
         self.depth_ = self._compute_depth(self.root_)
+        del self.X_, self.y_
         return self
-
-    def _compute_depth(self, node: Node, current: int = 0) -> int:
-        """Compute the maximum depth of the tree."""
-        if isinstance(node, Leaf):
-            return current
-        return max(
-            self._compute_depth(node.left, current + 1),
-            self._compute_depth(node.right, current + 1)
-        )
 
     def _detect_types(self) -> None:
         """Classify features as categorical or numerical."""
@@ -297,7 +322,7 @@ class KernelTree:
             return self._make_leaf(X, y)
 
         feat, thresh, gain = split
-        if gain < 1e-4:  # no meaningful improvement
+        if gain < self.gain_threshold: 
             return self._make_leaf(X, y)
         
         left_mask = X[:, feat] <= thresh
@@ -312,7 +337,7 @@ class KernelTree:
         best_mse, best_feat, best_thresh = base_mse, None, None
 
         for f in self.categorical_:
-            values = np.unique(X[:, f])
+            values = np.unique(X[:, f]) 
             for thresh in values[:-1]:
                 left_mask = X[:, f] <= thresh
                 n_left, n_right = left_mask.sum(), (~left_mask).sum()
@@ -329,7 +354,7 @@ class KernelTree:
             return None
         
         return best_feat, best_thresh, base_mse - best_mse
-
+    
     def _make_leaf(self, X: np.ndarray, y: np.ndarray) -> Leaf:
         """Create leaf with kernel estimator or mean constant."""
         n = len(y)
@@ -339,6 +364,104 @@ class KernelTree:
             k.fit(X_num, y)
             return Leaf(k)
         return Leaf(float(np.mean(y)))
+
+    def _grow_constant(self, sorted_by_feat: list[np.ndarray], depth: int = 0) -> Node:
+        """Grow a tree with constant leaves."""
+        n = len(sorted_by_feat[0])
+        samples = sorted_by_feat[0]
+
+        if depth >= self._const_max_depth or n < 1.5 * self._const_min_sample:
+            return Leaf(float(np.mean(self.y_[samples])))
+
+        split = self._find_constant_split(sorted_by_feat, n)
+        if split is None:
+            return Leaf(float(np.mean(self.y_[samples])))
+
+        feat, thresh, gain = split
+        if gain < self.gain_threshold:
+            return Leaf(float(np.mean(self.y_[samples])))
+
+        left_sorted, right_sorted = [], []
+        for f in range(self.n_features_):
+            left_mask = self.X_[sorted_by_feat[f], feat] <= thresh
+            left_sorted.append(sorted_by_feat[f][left_mask])
+            right_sorted.append(sorted_by_feat[f][~left_mask])
+
+        return Branch(feat, thresh,
+                      self._grow_constant(left_sorted, depth + 1),
+                      self._grow_constant(right_sorted, depth + 1))
+
+    def _find_constant_split(
+        self,
+        sorted_by_feat: list[np.ndarray],
+        n: int) -> tuple[int, float, float] | None:
+        """Find best split by MSE reduction across all features."""
+        base_mse = np.var(self.y_[sorted_by_feat[0]])
+        best_mse, best_feat, best_thresh = base_mse, None, None
+        min_s = self._const_min_sample
+
+        for f in range(self.n_features_):
+            idx = sorted_by_feat[f]
+            col_sorted = self.X_[idx, f]
+            y_sorted = self.y_[idx].astype(np.float64)
+
+            cum_sum = np.cumsum(y_sorted)
+            cum_sq = np.cumsum(y_sorted ** 2)
+            total_sum = cum_sum[-1]
+            total_sq = cum_sq[-1]
+
+            values = np.quantile(col_sorted, self.quantiles)
+            values = values[:-1]  # skip last candidate
+            positions = np.searchsorted(col_sorted, values, side='right')
+
+            # filter valid splits
+            valid = (positions >= min_s) & (positions <= n - min_s)
+            if not np.any(valid):
+                continue
+
+            pos = positions[valid]
+            thresholds = values[valid]
+
+            # skip duplicates — same partition, same MSE
+            unique_mask = np.empty(len(pos), dtype=bool)
+            unique_mask[0] = True
+            unique_mask[1:] = np.diff(pos) != 0
+            pos = pos[unique_mask]
+            thresholds = thresholds[unique_mask]
+
+            # vectorized MSE via cumulative sums
+            left_n = pos.astype(np.float64)
+            left_sum = cum_sum[pos - 1]
+            left_sq = cum_sq[pos - 1]
+            right_n = n - left_n
+            right_sum = total_sum - left_sum
+            right_sq = total_sq - left_sq
+
+            # guards against negatives
+            left_var = np.maximum(0.0, left_sq / left_n - (left_sum / left_n) ** 2)
+            right_var = np.maximum(0.0, right_sq / right_n - (right_sum / right_n) ** 2)
+
+            mse = (left_n * left_var + right_n * right_var) / n
+
+            idx_best = np.argmin(mse)
+            if mse[idx_best] < best_mse:
+                best_mse = mse[idx_best]
+                best_feat = f
+                best_thresh = float(thresholds[idx_best])
+
+        if best_feat is None:
+            return None
+
+        return best_feat, best_thresh, base_mse - best_mse
+    
+    def _compute_depth(self, node: Node, current: int = 0) -> int:
+        """Compute the maximum depth of the tree."""
+        if isinstance(node, Leaf):
+            return current
+        return max(
+            self._compute_depth(node.left, current + 1),
+            self._compute_depth(node.right, current + 1)
+        )
 
     def _compile(self, root: Node) -> CompiledTree:
         """Convert nested tree structure to flat thresholds for prediction
@@ -428,6 +551,10 @@ class KernelTree:
             'initial_precision': self.initial_precision,
             'sample_share': self.sample_share,
             'precision_method': self.precision_method,
+            'pilot_factor': self.pilot_factor,
+            'tree_type': self.tree_type,
+            'gain_threshold': self.gain_threshold,
+            'quantiles': self.quantiles,
         }
 
     def set_params(self, **params) -> "KernelTree":
@@ -445,8 +572,15 @@ class KernelTree:
             'initial_precision': self.initial_precision,
             'sample_share': self.sample_share,
             'precision_method': self.precision_method,
+            'pilot_factor': self.pilot_factor,
         }
+
+        self._const_min_sample = max(50, self.min_sample // 5)
+        self._const_max_depth = self.max_depth + 3
 
         self._validate_params()
 
         return self
+
+
+

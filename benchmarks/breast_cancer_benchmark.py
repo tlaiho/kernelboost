@@ -63,6 +63,7 @@ if __name__ == "__main__":
         recency_decay=0.7,
         temperature=0.35,
         weight_decay=0.95,
+        constant_tree_frequency=30,
     )
 
     kb = KernelBooster(

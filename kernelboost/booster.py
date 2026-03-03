@@ -362,11 +362,12 @@ class KernelBooster:
         """Execute one boosting iteration."""
         pseudoresiduals = self.objective.gradient(self.y_, self.predictions_)
 
-        # get features for this round
+        # get features and leaf type for this round
         if self._use_selector:
-            feature_indices = self.feature_selector.get_features(round_idx, pseudoresiduals)
+            feature_indices, tree_type = self.feature_selector.get_features(round_idx, pseudoresiduals)
         else:
-            feature_indices = self.feature_list_[round_idx]
+            # tree type could come from tuple / list too: 
+            feature_indices, tree_type = self.feature_list_[round_idx], 'kernel'  
 
         training_features = self.X_[:, feature_indices]
         all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
@@ -384,6 +385,7 @@ class KernelBooster:
                 **self.tree_optimization,
                 use_gpu=self.use_gpu,
                 **self.kernel_optimization,
+                tree_type=tree_type,
             )
         )
         self.trees_[-1].fit(training_data[:, 1:], training_data[:, 0].reshape(-1, 1))
@@ -391,13 +393,14 @@ class KernelBooster:
         # store tree predictions for hyperparameter optimization
         self.tree_predictions_.append(self.trees_[-1].predict(training_features))
 
-        precisions = [
-            est.precision_ for est, is_kern in zip(
-                self.trees_[-1].compiled_.estimators, self.trees_[-1].compiled_.is_kernel
-            ) if is_kern
-        ]
-        if precisions:
-            self.last_precision_ = np.mean(precisions)
+        if tree_type == 'kernel':
+            precisions = [
+                est.precision_ for est, is_kern in zip(
+                    self.trees_[-1].compiled_.estimators, self.trees_[-1].compiled_.is_kernel
+                ) if is_kern
+            ]
+            if precisions:
+                self.last_precision_ = np.mean(precisions)
 
         self.rho_.append(
             self.objective.line_search(

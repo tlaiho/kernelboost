@@ -67,20 +67,21 @@ if __name__ == "__main__":
         temperature=0.35,
         weight_decay=0.95,
         feature_groups=[[6, 7]],
+        constant_tree_frequency=20,
     )
 
     kb = KernelBooster(
         objective=MSEObjective(),
         feature_selector=selector,
-        max_sample=4000,
-        min_sample=750,
+        max_sample=3750,
+        min_sample=700,
         n_estimators=250,
         subsample_share=0.8,
         lambda1=0.0002, 
         learning_rate=0.8,
         min_features=1,
         max_features=5,
-        overlap_epsilon=0.05,
+        overlap_epsilon=0.075,
         n_iter_no_change=30,
         use_gpu=use_gpu,
         verbose=0,
@@ -96,7 +97,7 @@ if __name__ == "__main__":
 
     # HGBR  
     hgb = HistGradientBoostingRegressor(
-        max_iter=250, max_depth=5, learning_rate=0.1,
+        max_iter=350, max_depth=5, learning_rate=0.1,
     )
 
     t0 = time.time()
@@ -107,7 +108,7 @@ if __name__ == "__main__":
 
     # XGBoost  
     xgb_model = xgb.XGBRegressor(
-        n_estimators=250, max_depth=5, learning_rate=0.1,
+        n_estimators=350, max_depth=5, learning_rate=0.1,
         early_stopping_rounds=30,
     )
 
@@ -119,7 +120,7 @@ if __name__ == "__main__":
 
     #  LightGBM  
     lgb_model = lgb.LGBMRegressor(
-        n_estimators=250, max_depth=5, learning_rate=0.1, verbose=-1,
+        n_estimators=350, max_depth=5, learning_rate=0.1, verbose=-1,
     )
 
     t0 = time.time()

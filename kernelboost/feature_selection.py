@@ -45,9 +45,9 @@ class FeatureSelector(ABC):
         pass
 
     @abstractmethod
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:
+    def get_features(self, round_idx: int, residuals: np.ndarray) -> tuple[list[int], str]:
         """
-        Get feature indices for the next boosting round.
+        Get feature indices and tree type for the next boosting round.
 
         Args:
         round_idx : int
@@ -56,8 +56,8 @@ class FeatureSelector(ABC):
             Current pseudo-residuals (n_samples,)
 
         Returns:
-        list[int]
-            Feature indices to use for this round
+        tuple[list[int], str]
+            Feature indices and leaf type ('kernel' or 'constant')
         """
         pass
 
@@ -139,7 +139,7 @@ class RandomSelector(FeatureSelector):
 
     def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:
         selected = next(self._gen)
-        return self._complete_groups(selected)
+        return self._complete_groups(selected), "kernel"  # could be randomized? 
 
 
 class SmartSelector(FeatureSelector):
@@ -176,6 +176,7 @@ class SmartSelector(FeatureSelector):
         temperature: float = 0.3,
         weight_decay: float = 0.9,
         feature_groups: list[list[int]] | None = None,
+        constant_tree_frequency: int = 50,
         seed: int | None = None,
     ):
         super().__init__()
@@ -187,6 +188,9 @@ class SmartSelector(FeatureSelector):
         self.weight_decay = weight_decay
         self.feature_groups = feature_groups
         self.seed = seed if seed is not None else np.random.randint(0, 2**31)
+        
+        self.constant_frequency = constant_tree_frequency
+        
 
     def initialize(
         self,
@@ -228,11 +232,17 @@ class SmartSelector(FeatureSelector):
         while True:
             yield max_size
 
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:
-        k = next(self._size_gen)
-        relevance = self._compute_relevance(residuals)
-        selected = self._select_features(k, relevance)
-        return self._complete_groups(selected)
+    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:        
+        if round_idx > 0 and round_idx % self.constant_frequency == 0:
+            tree_type = "constant"
+            selected = list(range(self.n_features))
+        else:
+            tree_type = "kernel"
+            k = next(self._size_gen)
+            relevance = self._compute_relevance(residuals)
+            selected = self._select_features(k, relevance)
+        
+        return self._complete_groups(selected), tree_type
 
     def update(self, feature_indices: list[int], gain: float) -> None:
         self.recency_scores_ *= self.recency_decay
