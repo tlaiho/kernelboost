@@ -57,13 +57,7 @@ if __name__ == "__main__":
 
     #  kernelboost 
     selector = SmartSelector(
-        redundancy_penalty=0.4,
-        relevance_alpha=0.7,
-        recency_penalty=0.3,
-        recency_decay=0.7,
-        temperature=0.35,
-        weight_decay=0.95,
-        constant_tree_frequency=30,
+        relevance_alpha=0.6,
     )
 
     kb = KernelBooster(
@@ -72,11 +66,9 @@ if __name__ == "__main__":
         min_sample=80,
         n_estimators=100,
         subsample_share=0.85,
-        lambda1=0.0002,
-        learning_rate=0.85,
         min_features=1,
         max_features=5,
-        overlap_epsilon=0.05,
+        overlap_epsilon=0.07,
         feature_selector=selector,
         use_gpu=use_gpu,
         verbose=0,
@@ -92,7 +84,7 @@ if __name__ == "__main__":
 
     # HGBC
     hgb = HistGradientBoostingClassifier(
-        max_iter=150, max_depth=5, learning_rate=0.1,
+        max_iter=200, max_depth=5, learning_rate=0.1,
     )
 
     t0 = time.time()
@@ -103,7 +95,7 @@ if __name__ == "__main__":
 
     # XGBoost
     xgb_model = xgb.XGBClassifier(
-        n_estimators=150, max_depth=5, learning_rate=0.1,
+        n_estimators=200, max_depth=5, learning_rate=0.1,
     )
 
     t0 = time.time()
@@ -114,7 +106,7 @@ if __name__ == "__main__":
 
     # LightGBM
     lgb_model = lgb.LGBMClassifier(
-        n_estimators=150, max_depth=5, learning_rate=0.1, verbose=-1,
+        n_estimators=200, max_depth=5, learning_rate=0.1, verbose=-1,
     )
 
     t0 = time.time()

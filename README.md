@@ -113,7 +113,7 @@ lambda1, learning_rate = opt.find_hyperparameters()
 
 #### Uncertainty Quantification (Experimental)
 
-KernelBooster has both prediction intervals and conditional variance prediction (Fan & Yao 1998) based on kernel estimation. These come for "free" on top of training and require no extra data. Still work in progress.
+KernelBooster has both prediction intervals and conditional variance prediction (Fan & Yao 1998) based on kernel estimation. These require no extra data and in that sense come for "free" on top of training. Still work in progress.
 
 ```python
 # Prediction intervals (90% by default)
@@ -123,7 +123,7 @@ lower, upper = booster.predict_intervals(X, alpha=0.1)
 variance = booster.predict_variance(X)
 ```
 
-Both interval coverage and conditional variance have a tendency to be underestimated, but this depends on the data and how well boosting has converged. No special tuning required: settings that optimize MSE have also given reasonable uncertainty estimates in testing. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
+Both interval coverage and conditional variance have a tendency to be underestimated, but this depends on the data and how well boosting has converged. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
 
 #### Data Preprocessing
 

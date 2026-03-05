@@ -785,6 +785,7 @@ class KernelBooster:
             'initial_precision': self.initial_precision,
             'sample_share': self.sample_share,
             'precision_method': self.precision_method,
+            'pilot_factor': self.pilot_factor,
         }
 
         self.tree_optimization = {

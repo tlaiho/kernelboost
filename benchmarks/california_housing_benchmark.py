@@ -61,11 +61,9 @@ if __name__ == "__main__":
     # kernelboost
     selector = SmartSelector(
         redundancy_penalty=0.4,
-        relevance_alpha=0.7,
-        recency_penalty=0.3,
-        recency_decay=0.7,
-        temperature=0.35,
-        weight_decay=0.95,
+        relevance_alpha=0.85,
+        temperature=0.15,
+        temperature_max=0.3,
         feature_groups=[[6, 7]],
         constant_tree_frequency=20,
     )
@@ -77,8 +75,7 @@ if __name__ == "__main__":
         min_sample=700,
         n_estimators=250,
         subsample_share=0.8,
-        lambda1=0.0002, 
-        learning_rate=0.8,
+        learning_rate=0.35,
         min_features=1,
         max_features=5,
         overlap_epsilon=0.075,
@@ -97,7 +94,7 @@ if __name__ == "__main__":
 
     # HGBR  
     hgb = HistGradientBoostingRegressor(
-        max_iter=350, max_depth=5, learning_rate=0.1,
+        max_iter=400, max_depth=5, learning_rate=0.1,
     )
 
     t0 = time.time()
@@ -108,7 +105,7 @@ if __name__ == "__main__":
 
     # XGBoost  
     xgb_model = xgb.XGBRegressor(
-        n_estimators=350, max_depth=5, learning_rate=0.1,
+        n_estimators=400, max_depth=5, learning_rate=0.1,
         early_stopping_rounds=30,
     )
 
@@ -120,7 +117,7 @@ if __name__ == "__main__":
 
     #  LightGBM  
     lgb_model = lgb.LGBMRegressor(
-        n_estimators=350, max_depth=5, learning_rate=0.1, verbose=-1,
+        n_estimators=400, max_depth=6, learning_rate=0.1, verbose=-1,
     )
 
     t0 = time.time()

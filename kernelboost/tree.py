@@ -200,7 +200,7 @@ class KernelTree:
                 raise ValueError(f"feature_types values must be 'C' or 'N', got invalid keys: {invalid}")
         if not (0.0 <= self.overlap_epsilon < 0.5):
             raise ValueError("overlap_epsilon must be in [0.0, 0.5)")
-        if self.tree_type not in {'kernel', 'constant'}:
+        if self.tree_type not in {"kernel", "constant"}:
             raise ValueError(f"tree_type must be 'kernel' or 'constant', got '{self.tree_type}'")
         if self.gain_threshold < 0:
             raise ValueError(f"gain_threshold must be >= 0, got {self.gain_threshold}")
@@ -210,17 +210,19 @@ class KernelTree:
         self.X_ = X.astype(np.float32)
         self.y_ = y.astype(np.float32).ravel()
         self.n_samples_, self.n_features_ = X.shape
+        
+        self._detect_types()
+        if not self.numerical_:
+            self.tree_type = "constant"
 
-        if self.tree_type == 'constant':
+        if self.tree_type == "constant":
             self.categorical_ = []
             self.numerical_ = list(range(self.n_features_))
-            self._use_kernel = False
             # uses indices rather than values:
             sorted_by_feat = [np.argsort(self.X_[:, f]) for f in range(self.n_features_)]
             self.root_ = self._grow_constant(sorted_by_feat)
         else:
             self.feature_ranges_ = self.X_.max(axis=0) - self.X_.min(axis=0)
-            self._detect_types()
             self.root_ = self._grow_numerical(self.X_, self.y_)
             if self.categorical_:
                 self.root_ = self._expand_categorical(self.root_, self.X_, self.y_)
@@ -250,7 +252,6 @@ class KernelTree:
                     self.categorical_.append(i)
                 else:
                     self.numerical_.append(i)
-        self._use_kernel = len(self.numerical_) > 0
 
     def _grow_numerical(self, X: np.ndarray, y: np.ndarray) -> Node:
         """Grow a tree on numerical features."""
@@ -358,7 +359,7 @@ class KernelTree:
     def _make_leaf(self, X: np.ndarray, y: np.ndarray) -> Leaf:
         """Create leaf with kernel estimator or mean constant."""
         n = len(y)
-        if self._use_kernel and n <= self.max_sample:
+        if n <= self.max_sample:
             X_num = np.delete(X, self.categorical_, axis=1) if self.categorical_ else X
             k = KernelEstimator(use_gpu=self.use_gpu, **self.kernel_optimization)
             k.fit(X_num, y)

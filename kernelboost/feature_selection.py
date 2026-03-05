@@ -3,6 +3,25 @@ from collections.abc import Generator
 import numpy as np
 
 
+def _histogram_mi(x: np.ndarray, y: np.ndarray, x_thresholds: np.ndarray, y_thresholds: np.ndarray) -> float:
+    """Estimate mutual information using precomputed quantile bin edges."""
+    n = len(x)
+    hist, _, _ = np.histogram2d(x, y, bins=[x_thresholds, y_thresholds])
+
+    # joint
+    pxy = hist / n
+    # marginals
+    px = pxy.sum(axis=1)
+    py = pxy.sum(axis=0)
+
+    # MI = sum p(x,y) * log(p(x,y) / (p(x) * p(y)))
+    outer = px[:, None] * py[None, :]
+    mask = (pxy > 0) & (outer > 0)
+    mi = np.sum(pxy[mask] * np.log(pxy[mask] / outer[mask]))
+
+    return max(0.0, mi)
+
+
 class FeatureSelector(ABC):
     """
     Abstract base class for feature selection strategies.
@@ -144,25 +163,30 @@ class RandomSelector(FeatureSelector):
 
 class SmartSelector(FeatureSelector):
     """
-    Feature selection using mRMR-style approach using correlations. 
-    Selects features probabilistically based on relevance, redundancy and recency. 
+    Feature selection using mRMR-style approach with mutual information relevance.
+    Selects features probabilistically based on relevance, redundancy and recency.
     Kernel sizes progress from small to large.
 
     Args:
     redundancy_penalty : float, default=0.4
         Weight for redundancy penalty (0 = ignore, 1 = strong penalty)
-    relevance_alpha : float, default=0.6
-        Balance between residual correlation (1.0) and historical weight (0.0)
-    recency_penalty : float, default=0.3
+    relevance_alpha : float, default=0.7
+        Balance between MI relevance (1.0) and historical weight (0.0)
+    recency_penalty : float, default=0.35
         Penalty applied to recently-used features (0 = no penalty, 1 = strong)
     recency_decay : float, default=0.7
         Decay factor for recency penalty each round (0 = instant decay, 1 = no decay)
     temperature : float, default=0.3
-        Softmax temperature for feature selection. Lower = greedier, higher = more exploration.
-    weight_decay : float, default=0.9
+        Softmax temperature (minimum when using schedule). Higher means more exploration.
+    temperature_max : float | None, default=None
+        Starting temperature for schedule. None means no schedule (fixed temperature).
+        Decays linearly from temperature_max to temperature over all rounds.
+    weight_decay : float, default=0.95
         Decay factor for feature weights each round.
     feature_groups : list[list[int]] | None, default=None
         Groups of features that should be selected together.
+    constant_tree_frequency : int, default=25
+        Insert a constant-leaf tree every N rounds.
     seed : int, optional
         Random seed for reproducibility.
     """
@@ -170,13 +194,14 @@ class SmartSelector(FeatureSelector):
     def __init__(
         self,
         redundancy_penalty: float = 0.4,
-        relevance_alpha: float = 0.6,
-        recency_penalty: float = 0.3,
+        relevance_alpha: float = 0.7,
+        recency_penalty: float = 0.35,
         recency_decay: float = 0.7,
         temperature: float = 0.3,
-        weight_decay: float = 0.9,
+        temperature_max: float | None = None,
+        weight_decay: float = 0.95,
         feature_groups: list[list[int]] | None = None,
-        constant_tree_frequency: int = 50,
+        constant_tree_frequency: int = 25,
         seed: int | None = None,
     ):
         super().__init__()
@@ -185,12 +210,12 @@ class SmartSelector(FeatureSelector):
         self.recency_penalty = recency_penalty
         self.recency_decay = recency_decay
         self.temperature = temperature
+        self.temperature_max = temperature_max
         self.weight_decay = weight_decay
         self.feature_groups = feature_groups
         self.seed = seed if seed is not None else np.random.randint(0, 2**31)
-        
+
         self.constant_frequency = constant_tree_frequency
-        
 
     def initialize(
         self,
@@ -201,12 +226,21 @@ class SmartSelector(FeatureSelector):
         rounds: int,
     ) -> int:
         self.n_features = n_features
-
-        self.X_std_ = X.std(axis=0)
-        self.X_centered_ = X - X.mean(axis=0)
+        self.X_ = X
+        self.n_bins_ = max(10, int(np.sqrt(X.shape[0] / 5)))
+        self.rounds_ = rounds
+        self.schedule_rounds_ = max(1, rounds) if self.temperature_max is not None else None
 
         self.corr_matrix_ = np.corrcoef(X, rowvar=False)
         self.corr_matrix_ = np.nan_to_num(self.corr_matrix_, nan=0.0)
+
+        # precompute quantile thresholds for each feature
+        self.quantiles = np.linspace(0, 1, self.n_bins_ + 1)
+        self.x_thresholds_ = [
+            np.unique(np.quantile(X[:, f], self.quantiles))
+            for f in range(n_features)
+        ]
+
         self.feature_weights_ = np.zeros(n_features)
         self.recency_scores_ = np.zeros(n_features)
         self._rng = np.random.default_rng(self.seed)
@@ -232,16 +266,16 @@ class SmartSelector(FeatureSelector):
         while True:
             yield max_size
 
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:        
+    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:
         if round_idx > 0 and round_idx % self.constant_frequency == 0:
             tree_type = "constant"
             selected = list(range(self.n_features))
         else:
             tree_type = "kernel"
-            k = next(self._size_gen)
+            n_features = next(self._size_gen)
             relevance = self._compute_relevance(residuals)
-            selected = self._select_features(k, relevance)
-        
+            selected = self._select_features(n_features, relevance, round_idx)
+
         return self._complete_groups(selected), tree_type
 
     def update(self, feature_indices: list[int], gain: float) -> None:
@@ -256,32 +290,35 @@ class SmartSelector(FeatureSelector):
                 self.feature_weights_[idx] += weight_increment
 
     def _compute_relevance(self, pseudoresiduals: np.ndarray) -> np.ndarray:
-        """Compute relevance scores from residual correlation, history, and recency."""
-        pseudoresiduals = pseudoresiduals.ravel()
+        """Compute relevance scores from MI with residuals, history, and recency."""
+        residuals = pseudoresiduals.ravel()
+        y_thresholds = np.unique(np.quantile(residuals, self.quantiles))
 
-        # correlation with pseudoresiduals
-        r_centered = pseudoresiduals - pseudoresiduals.mean()
-        r_std = r_centered.std()
+        raw_scores = np.zeros(self.X_.shape[1])
+        for f in range(self.X_.shape[1]):
+            raw_scores[f] = _histogram_mi(self.X_[:, f], residuals, self.x_thresholds_[f], y_thresholds)
 
-        cov = self.X_centered_.T @ r_centered / len(pseudoresiduals)
-        denom = self.X_std_ * r_std
-        correlations = np.abs(np.divide(cov, denom, out=np.zeros_like(cov), where=denom > 1e-10))
-
-        # normalize to max values
-        corr_norm = correlations / (correlations.max() + 1e-10)
+        # normalize to [0, 1]
+        scores_norm = raw_scores / (raw_scores.max() + 1e-10)
         weights_norm = self.feature_weights_ / (self.feature_weights_.max() + 1e-10)
 
         relevance = (
-            self.relevance_alpha * corr_norm +
-            (1 - self.relevance_alpha) * weights_norm - 
+            self.relevance_alpha * scores_norm +
+            (1 - self.relevance_alpha) * weights_norm -
             self.recency_penalty * self.recency_scores_
         )
-        relevance = np.maximum(relevance, 0.0)
+        return np.maximum(relevance, 0.0)
 
-        return relevance
+    def _get_temperature(self, round_idx: int) -> float:
+        """Compute temperature for the current round."""
+        if self.schedule_rounds_ is None:
+            return self.temperature
+        progress = min(round_idx / self.schedule_rounds_, 1.0)
+        return self.temperature_max + (self.temperature - self.temperature_max) * progress
 
-    def _select_features(self, k: int, relevance: np.ndarray) -> list[int]:
+    def _select_features(self, k: int, relevance: np.ndarray, round_idx: int) -> list[int]:
         """Select k features probabilistically using relevance and redundancy."""
+        temp = self._get_temperature(round_idx)
         selected = []
         available = list(range(self.n_features))
 
@@ -290,7 +327,6 @@ class SmartSelector(FeatureSelector):
                 break
             scores = np.zeros(len(available))
             for i, j in enumerate(available):
-                # redundancy with already selected
                 if selected:
                     redundancy = np.mean([
                         abs(self.corr_matrix_[j, s]) for s in selected
@@ -300,12 +336,10 @@ class SmartSelector(FeatureSelector):
 
                 scores[i] = relevance[j] - self.redundancy_penalty * redundancy
 
-            # convert scores to probabilities 
-            scaled = scores / self.temperature
-            exp_scores = np.exp(scaled - scaled.max())  # subtract max for numerical stability
+            scaled = scores / temp
+            exp_scores = np.exp(scaled - scaled.max())
             probs = exp_scores / exp_scores.sum()
 
-            # select based on probabilities
             idx = self._rng.choice(len(available), p=probs)
             feat = available[idx]
 
