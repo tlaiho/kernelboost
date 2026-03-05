@@ -72,7 +72,7 @@ float loo_mse(
     size_t tri_size = (size_t)n * (n + 1) / 2;
 
     // allocate upper triangle storage
-    float *upper = (float *)malloc(tri_size * sizeof(float));
+    float *upper = malloc(tri_size * sizeof(float));
     if (!upper) return -1.0f;
 
     // first pass: compute upper triangle kernel values

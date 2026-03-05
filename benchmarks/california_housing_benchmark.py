@@ -61,9 +61,9 @@ if __name__ == "__main__":
     # kernelboost
     selector = SmartSelector(
         redundancy_penalty=0.4,
-        relevance_alpha=0.85,
+        relevance_alpha=0.8,
         temperature=0.15,
-        temperature_max=0.3,
+        temperature_max=0.32,
         feature_groups=[[6, 7]],
         constant_tree_frequency=20,
     )

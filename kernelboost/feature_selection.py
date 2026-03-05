@@ -1,25 +1,45 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator
+import ctypes
+import os
+import platform
+
 import numpy as np
+from numpy.ctypeslib import ndpointer
 
+# Load C library for fast MI computation
+_dir_path = os.path.dirname(os.path.realpath(__file__))
 
-def _histogram_mi(x: np.ndarray, y: np.ndarray, x_thresholds: np.ndarray, y_thresholds: np.ndarray) -> float:
-    """Estimate mutual information using precomputed quantile bin edges."""
-    n = len(x)
-    hist, _, _ = np.histogram2d(x, y, bins=[x_thresholds, y_thresholds])
+_system = platform.system()
+if _system == "Linux":
+    _mi_libname = f"{_dir_path}/libmi.so"
+elif _system == "Windows":
+    _mi_libname = f"{_dir_path}/libmi.dll"
+elif _system == "Darwin":
+    _mi_libname = f"{_dir_path}/libmi.dylib"
+else:
+    raise Exception(f"Platform '{_system}' not supported.")
 
-    # joint
-    pxy = hist / n
-    # marginals
-    px = pxy.sum(axis=1)
-    py = pxy.sum(axis=0)
+try:
+    _mi_lib = ctypes.CDLL(_mi_libname)
+except OSError:
+    raise OSError(
+        f"Could not load C library at {_mi_libname}. "
+        f"Compile it with: gcc -shared -o {_mi_libname} -fPIC kernelboost/mi_bins.c "
+        f"-lm -fopenmp -O3 -march=native -ffast-math -funroll-loops -flto"
+    )
 
-    # MI = sum p(x,y) * log(p(x,y) / (p(x) * p(y)))
-    outer = px[:, None] * py[None, :]
-    mask = (pxy > 0) & (outer > 0)
-    mi = np.sum(pxy[mask] * np.log(pxy[mask] / outer[mask]))
-
-    return max(0.0, mi)
+_mi_lib.histogram_mi_batch.restype = None
+_mi_lib.histogram_mi_batch.argtypes = (
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # X
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # residuals
+    ctypes.c_int,                                       # n
+    ctypes.c_int,                                       # n_features
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # x_thresholds
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # y_thresholds
+    ctypes.c_int,                                       # n_thresh
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # out_mi
+)
 
 
 class FeatureSelector(ABC):
@@ -234,12 +254,13 @@ class SmartSelector(FeatureSelector):
         self.corr_matrix_ = np.corrcoef(X, rowvar=False)
         self.corr_matrix_ = np.nan_to_num(self.corr_matrix_, nan=0.0)
 
-        # precompute quantile thresholds for each feature
+        # precompute quantile thresholds for each feature (fixed count for C compatibility)
         self.quantiles = np.linspace(0, 1, self.n_bins_ + 1)
-        self.x_thresholds_ = [
-            np.unique(np.quantile(X[:, f], self.quantiles))
+        self.n_thresh_ = self.n_bins_ + 1
+        self.x_thresholds_ = np.array([
+            np.quantile(X[:, f], self.quantiles)
             for f in range(n_features)
-        ]
+        ], dtype=np.float32)
 
         self.feature_weights_ = np.zeros(n_features)
         self.recency_scores_ = np.zeros(n_features)
@@ -291,12 +312,20 @@ class SmartSelector(FeatureSelector):
 
     def _compute_relevance(self, pseudoresiduals: np.ndarray) -> np.ndarray:
         """Compute relevance scores from MI with residuals, history, and recency."""
-        residuals = pseudoresiduals.ravel()
-        y_thresholds = np.unique(np.quantile(residuals, self.quantiles))
+        residuals = np.ascontiguousarray(pseudoresiduals.ravel(), dtype=np.float32)
+        y_thresholds = np.quantile(residuals, self.quantiles).astype(np.float32)
 
-        raw_scores = np.zeros(self.X_.shape[1])
-        for f in range(self.X_.shape[1]):
-            raw_scores[f] = _histogram_mi(self.X_[:, f], residuals, self.x_thresholds_[f], y_thresholds)
+        raw_scores = np.zeros(self.n_features, dtype=np.float32)
+        _mi_lib.histogram_mi_batch(
+            np.ascontiguousarray(self.X_),
+            residuals,
+            self.X_.shape[0],
+            self.n_features,
+            np.ascontiguousarray(self.x_thresholds_),
+            np.ascontiguousarray(y_thresholds),
+            self.n_thresh_,
+            raw_scores,
+        )
 
         # normalize to [0, 1]
         scores_norm = raw_scores / (raw_scores.max() + 1e-10)
