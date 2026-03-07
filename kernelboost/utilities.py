@@ -452,4 +452,40 @@ class RankTransformer:
     ) -> np.ndarray:
         """Fit and transform in one step."""
         return self.fit(X, y, **fit_params).transform(X)
+    
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray:
+        """Inverse-transform ranks back to approximate original values.
+
+        Inversion is lossy: distinct values that mapped to the same rank bin
+        will inverse-transform to the same interpolated value."""
+        
+        if not self._is_fitted:
+            raise RuntimeError("RankTransformer must be fitted before inverse_transform.")
+
+        if X.shape[1] != self.n_features_:
+            raise ValueError(
+                f"X has {X.shape[1]} features, but RankTransformer was fitted with {self.n_features_} features."
+            )
+
+        X_out = X.copy().astype(np.float64)
+
+        for feature in range(self.n_features_):
+            if feature not in self.exclude:
+                ref = self.reference_values_[feature]
+                n = len(ref)
+
+                if self.pct:
+                    indices = X[:, feature] * n - 1
+                else:
+                    indices = X[:, feature] - 1
+
+                indices = np.clip(indices, 0, n - 1)
+
+                lo = np.floor(indices).astype(int)
+                hi = np.minimum(lo + 1, n - 1)
+                frac = indices - lo
+
+                X_out[:, feature] = ref[lo] * (1 - frac) + ref[hi] * frac
+
+        return np.ascontiguousarray(X_out)
 
