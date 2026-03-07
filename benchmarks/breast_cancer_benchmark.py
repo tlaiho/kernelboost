@@ -57,7 +57,7 @@ if __name__ == "__main__":
 
     #  kernelboost 
     selector = SmartSelector(
-        relevance_alpha=0.6,
+        relevance_alpha=0.7,
     )
 
     kb = KernelBooster(
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         subsample_share=0.85,
         min_features=1,
         max_features=5,
-        overlap_epsilon=0.07,
+        overlap_epsilon=0.1,
         feature_selector=selector,
         use_gpu=use_gpu,
         verbose=0,

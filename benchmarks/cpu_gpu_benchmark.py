@@ -63,7 +63,6 @@ if __name__ == "__main__":
         min_sample=700,
         n_estimators=250,
         subsample_share=0.8,
-        lambda1=0.0002,
         learning_rate=0.8,
         min_features=1,
         max_features=5,

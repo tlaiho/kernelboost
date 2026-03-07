@@ -122,7 +122,7 @@ lower, upper = booster.predict_intervals(X, alpha=0.1)
 variance = booster.predict_variance(X)
 ```
 
-Both interval coverage and conditional variance have a tendency to be underestimated, but this depends on the data and how well boosting has converged. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
+Both interval coverage and conditional variance have a tendency to be underestimated. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
 
 #### Data Preprocessing
 
@@ -196,10 +196,10 @@ Results have inherent randomness due to feature selection and subsampling. Scrip
 =================================================================
 Model                       MSE        MAE         R²       Time
 -----------------------------------------------------------------
-kernelboost              0.2053     0.2985     0.8452      11.0s
-sklearn HGBR             0.2247     0.3146     0.8306       0.1s
-XGBoost                  0.2155     0.3050     0.8376       0.1s
-LightGBM                 0.2097     0.3047     0.8419       0.1s
+kernelboost              0.1790     0.2781     0.8651      12.9s
+sklearn HGBR             0.2103     0.3018     0.8415       0.2s
+XGBoost                  0.2080     0.2962     0.8432       0.1s
+LightGBM                 0.1972     0.2894     0.8513       0.1s
 =================================================================
 ```
 
@@ -208,10 +208,10 @@ LightGBM                 0.2097     0.3047     0.8419       0.1s
 =================================================================
 Model                  Accuracy    AUC-ROC         F1       Time
 -----------------------------------------------------------------
-kernelboost              0.9825     0.9984     0.9861       1.6s
-sklearn HGBC             0.9649     0.9944     0.9722       0.1s
-XGBoost                  0.9561     0.9938     0.9650       0.0s
-LightGBM                 0.9649     0.9925     0.9722       0.0s
+kernelboost              0.9825     0.9984     0.9861       2.1s
+sklearn HGBC             0.9649     0.9948     0.9722       0.1s
+XGBoost                  0.9561     0.9941     0.9650       0.0s
+LightGBM                 0.9737     0.9921     0.9790       0.0s
 =================================================================
 ```
 
@@ -222,10 +222,10 @@ Kernel Methods Benchmark (n_train=10000)
 =================================================================
 Model                       MSE        MAE         R²       Time
 -----------------------------------------------------------------
-KernelBoost              0.2117     0.3077     0.8451       5.3s
-KernelRidge              0.4399     0.4903     0.6783       1.6s
-SVR                      0.3151     0.3794     0.7695       3.4s
-GP (n=5000)              0.3344     0.4093     0.7554      72.3s
+kernelboost              0.2027     0.2936     0.8456       4.7s
+KernelRidge              0.4258     0.4828     0.6756       1.5s
+SVR                      0.3133     0.3766     0.7613       3.3s
+GP (n=5000)              0.3300     0.4038     0.7485      29.8s
 =================================================================
 ```
 
@@ -238,8 +238,8 @@ Uncertainty Quantification (90% intervals, alpha=0.1)
 =================================================================
 Model                  Coverage    Width   Var Corr   Var Ratio
 -----------------------------------------------------------------
-KernelBoost              85.1%    1.134      0.261       1.313
-GP (n=5000)              90.6%    1.827      0.168       1.082
+kernelboost              91.4%    1.379      0.228       1.166
+GP (n=5000)              91.0%    1.832      0.156       1.062
 =================================================================
 ```
 
@@ -254,10 +254,10 @@ GPU vs CPU Training Time (California Housing, n=10000)
 =================================================================
 Backend                                                  Time
 -----------------------------------------------------------------
-CPU (C/OpenMP)                                          38.6s
-GPU (CuPy/CUDA)                                          4.6s
+CPU (C/OpenMP)                                          48.2s
+GPU (CuPy/CUDA)                                          7.3s
 =================================================================
-GPU speedup: 8.3x
+GPU speedup: 6.7x
 ```
 
 All benchmarks run on Ubuntu 22.04 with Ryzen 7700 and RTX 3090.
