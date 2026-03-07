@@ -7,7 +7,7 @@
 ![C](https://img.shields.io/badge/C-language-blue)
 ![GPU](https://img.shields.io/badge/GPU-CUDA%20C%2FCuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.2.1-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 
 kernelboost is a gradient boosting algorithm that uses Nadaraya-Watson (local constant) kernel estimators as base learners instead of decision trees. It has:
 
@@ -61,7 +61,7 @@ There are three main components to kernelboost: KernelBooster class that does th
 
 After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is random with increasing kernel sizes in terms of number of features. Random feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more boosting iterations. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
 
-KernelTree splits numerical data by density and categorical data by MSE. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a whopping 90% of compute.
+KernelTree splits numerical data by density and categorical data by MSE. It can also fit pure decision trees with mean values at leaves. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a nice 90% of compute.
 
 The actual estimation is handled by KernelEstimator. It optimizes a scalar precision (inverse bandwidth) for the local constant estimator using leave-one-out cross validation and random search between given bounds. It has both Gaussian and (isotropic) Laplace kernels with default being the Laplace kernel. KernelEstimator also has uncertainty quantification methods for quantile and conditional variance prediction (Fan & Yao 1998).
 
@@ -71,7 +71,7 @@ Beyond the core boosting algorithm, a few features worth highlighting:
 
 #### Smart Feature Selection
 
-While the default feature selection is random (RandomSelector), the package includes an mRMR style probabilistic algorithm (SmartSelector) based on correlations between features and pseudo-residuals and performance in previous boosting rounds.
+While the default feature selection is random (RandomSelector), the package includes an mRMR style probabilistic algorithm (SmartSelector) based on mutual information between features and pseudo-residuals and loss gain in previous boosting rounds.
 
 ```python
 from kernelboost.feature_selection import SmartSelector
@@ -79,7 +79,6 @@ from kernelboost.feature_selection import SmartSelector
 selector = SmartSelector(
     redundancy_penalty=0.4,
     relevance_alpha=0.7,
-    recency_penalty=0.3,
 )
 
 booster = KernelBooster(
@@ -274,7 +273,7 @@ All benchmarks run on Ubuntu 22.04 with Ryzen 7700 and RTX 3090.
 
 ## About
 
-kernelboost is a hobby project exploring alternatives to tree-based gradient boosting. Currently v0.2.1. Pre-compiled binaries included for Linux and Windows. Contributions and feedback welcome.
+kernelboost is a hobby project exploring alternatives to tree-based gradient boosting. Pre-compiled binaries included for Linux and Windows. Contributions and feedback welcome.
 
 ## License
 

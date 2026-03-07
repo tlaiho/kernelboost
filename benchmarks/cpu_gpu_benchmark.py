@@ -49,19 +49,18 @@ if __name__ == "__main__":
 
     selector = SmartSelector(
         redundancy_penalty=0.4,
-        relevance_alpha=0.7,
-        recency_penalty=0.3,
-        recency_decay=0.7,
-        temperature=0.35,
-        weight_decay=0.95,
+        relevance_alpha=0.8,
+        temperature=0.15,
+        temperature_max=0.30,
         feature_groups=[[6, 7]],
+        constant_tree_frequency=20,
     )
 
     common_params = dict(
         objective=MSEObjective(),
         feature_selector=selector,
-        max_sample=4000,
-        min_sample=750,
+        max_sample=3750,
+        min_sample=700,
         n_estimators=250,
         subsample_share=0.8,
         lambda1=0.0002,

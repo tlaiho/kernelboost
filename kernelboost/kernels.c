@@ -71,7 +71,7 @@ float loo_mse(
     int n = training_obs;
     size_t tri_size = (size_t)n * (n + 1) / 2;
 
-    // allocate upper triangle storage
+    // allocate upper triangle storage, check null
     float *upper = malloc(tri_size * sizeof(float));
     if (!upper) return -1.0f;
 

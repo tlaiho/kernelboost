@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-03-07
+
+### Added
+- Constant-leaf tree mode (`tree_type='constant'`) with vectorized MSE reduction splitting.
+- MI-based relevance scoring in SmartSelector using histogram mutual information.
+- C implementation of MI computation (`mi_bins.c`) with OpenMP parallelization.
+- Temperature scheduling in SmartSelector via `temperature_max` parameter.
+- `constant_tree_frequency` parameter in SmartSelector to control constant-leaf round frequency.
+
+### Changed
+- **Breaking**: `feature_list` renamed to `feature_tree_tuple`. Now accepts `(feature_indices, tree_type)` tuples.
+- Feature selectors now return `(features, tree_type)` tuples from `get_features()`.
+- `feature_importances_` now correctly accumulates all rounds instead of losing duplicates.
+
 ## [0.2.1] - 2026-03-01
 
 ### Changed

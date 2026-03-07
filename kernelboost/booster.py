@@ -10,18 +10,19 @@ class KernelBooster:
     objective : Objective
         Loss function (e.g., MSEObjective(), EntropyObjective()).
     feature_selector : FeatureSelector, default=None
-        Feature selection strategy. If None and feature_list not provided,
+        Feature selection strategy. If None and feature_tree_tuple not provided,
         defaults to RandomSelector.
     feature_names : list, default=None
         Names for features. Uses indices if None.
-    feature_list : list, default=None
-        Explicit feature subsets per round. Takes priority over feature_selector.
     min_features : int, default=1
         Minimum features per round.
     max_features : int, default=None
         Maximum features per round. If None, uses min(10, n_features).
     n_estimators : int, default=None
         Number of boosting rounds. Auto-calculated from n_features if None.
+    feature_tree_tuple : tuple, default=None
+        Explicit feature subsets and tree type ('kernel' or 'constant') per round. 
+        Takes priority over feature_selector.
     subsample_share : float, default=0.5
         Training sample share per round.
     lambda1 : float, default=0.0
@@ -66,10 +67,10 @@ class KernelBooster:
         objective,
         feature_selector: FeatureSelector = None,
         feature_names: list = None,
-        feature_list: list = None,
         min_features: int = 1,
         max_features: int = None,
         n_estimators: int = None,
+        feature_tree_tuple: tuple = None,
         subsample_share: float = 0.5,
         lambda1: float = 0.0,
         learning_rate: float = 0.5,
@@ -94,7 +95,7 @@ class KernelBooster:
         self.feature_selector = feature_selector
 
         self.feature_names = feature_names
-        self.feature_list = feature_list
+        self.feature_tree_tuple = feature_tree_tuple
         self.lambda1 = lambda1
         self.learning_rate = learning_rate
         self.n_estimators = n_estimators
@@ -163,6 +164,8 @@ class KernelBooster:
             raise ValueError(f"n_iter_no_change must be a positive integer or None, got {self.n_iter_no_change}")
         if not (0.0 <= self.overlap_epsilon < 0.5):
             raise ValueError(f"overlap_epsilon must be in [0.0, 0.5), got {self.overlap_epsilon}")
+        if self.feature_tree_tuple is not None and not isinstance(self.feature_tree_tuple, tuple):
+            raise ValueError(f"feature_tree_tuple: must be a tuple of (indices, tree_type) tuples")
 
     def _validate_data(self, X: np.ndarray, y: np.ndarray) -> None:
         """Validate training data."""
@@ -269,9 +272,6 @@ class KernelBooster:
 
         self._training_loop()
 
-        feature_tuples = (tuple(sublist) for sublist in self.fitted_features_)
-        self.rho_dict_ = dict(zip(feature_tuples, self.rho_))
-
         indices = self._last_n_active_tree_indices(1)
         self.last_active_tree_idx_ = indices[0] if indices else None
 
@@ -304,10 +304,10 @@ class KernelBooster:
         """Initialize training state."""
         self._sample_size = int(self.subsample_share * self.n_samples_)
 
-        # priority: explicit feature_list > feature_selector > default random
-        if self.feature_list is not None:
-            self.n_estimators_ = len(self.feature_list)
-            self.feature_list_ = self.feature_list
+        # priority: explicit feature_tree_tuple > feature_selector > default random
+        if self.feature_tree_tuple is not None:
+            self.n_estimators_ = len(self.feature_tree_tuple)
+            self.feature_tree_tuple_ = self.feature_tree_tuple
             self._use_selector = False
         else:
             # default to RandomSelector if no Selector given
@@ -366,8 +366,7 @@ class KernelBooster:
         if self._use_selector:
             feature_indices, tree_type = self.feature_selector.get_features(round_idx, pseudoresiduals)
         else:
-            # tree type could come from tuple / list too: 
-            feature_indices, tree_type = self.feature_list_[round_idx], 'kernel'  
+            feature_indices, tree_type = self.feature_tree_tuple_[round_idx]
 
         training_features = self.X_[:, feature_indices]
         all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
@@ -745,7 +744,7 @@ class KernelBooster:
         return {
             'objective': self.objective,
             'feature_names': self.feature_names,
-            'feature_list': self.feature_list,
+            'feature_tree_tuple': self.feature_tree_tuple,
             'feature_selector': self.feature_selector,
             'max_depth': self.max_depth,
             'max_sample': self.max_sample,
@@ -818,10 +817,10 @@ class KernelBooster:
     @property
     def feature_importances_(self) -> np.ndarray:
         """Feature importance based on aggregated |rho| values."""
-        if not hasattr(self, 'rho_dict_'):
+        if not hasattr(self, 'trees_'):
             raise RuntimeError("Booster not fitted. Call fit() first.")
         importances = np.zeros(self.n_features_in_)
-        for feature_indices, rho in self.rho_dict_.items():
+        for feature_indices, rho in zip(self.fitted_features_, self.rho_):
             for idx in feature_indices:
                 importances[idx] += abs(rho)
         total = importances.sum()

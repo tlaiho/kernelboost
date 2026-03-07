@@ -371,8 +371,6 @@ class RhoOptimizer:
 
         self.booster_.rho_ = list(self.rho_)
 
-        feature_tuples = (tuple(sublist) for sublist in self.booster_.fitted_features_)
-        self.booster_.rho_dict_ = dict(zip(feature_tuples, self.booster_.rho_))
 
         if self.lambda1_ is not None:
             self.booster_.lambda1 = self.lambda1_

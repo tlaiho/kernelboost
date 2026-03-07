@@ -176,9 +176,9 @@ class RandomSelector(FeatureSelector):
             self._rng.shuffle(features)
             yield features[:max_size].tolist()
 
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:
+    def get_features(self, round_idx: int, residuals: np.ndarray) -> tuple[list[int], str]:
         selected = next(self._gen)
-        return self._complete_groups(selected), "kernel"  # could be randomized? 
+        return self._complete_groups(selected), "kernel"
 
 
 class SmartSelector(FeatureSelector):
@@ -246,7 +246,7 @@ class SmartSelector(FeatureSelector):
         rounds: int,
     ) -> int:
         self.n_features = n_features
-        self.X_ = X
+        self.X_ = X.view()
         self.n_bins_ = max(10, int(np.sqrt(X.shape[0] / 5)))
         self.rounds_ = rounds
         self.schedule_rounds_ = max(1, rounds) if self.temperature_max is not None else None
@@ -317,7 +317,7 @@ class SmartSelector(FeatureSelector):
 
         raw_scores = np.zeros(self.n_features, dtype=np.float32)
         _mi_lib.histogram_mi_batch(
-            np.ascontiguousarray(self.X_),
+            np.ascontiguousarray(self.X_, dtype=np.float32),
             residuals,
             self.X_.shape[0],
             self.n_features,

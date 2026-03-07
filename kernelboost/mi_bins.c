@@ -6,16 +6,18 @@
 // C code for fast MI estimation over the whole feature set
 
 static int find_bin(float *thresholds, int n_thresh, float val) {
-//  standard binary search
     int lo = 0, hi = n_thresh - 2;
-    while (lo <= hi) {                                                                   
-        int mid = (lo + hi) / 2;                                       
-        if (val < thresholds[mid])                                                       
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (val < thresholds[mid])
             hi = mid - 1;
         else
             lo = mid + 1;
     }
-    return lo - 1; 
+    int bin = lo - 1;
+    if (bin < 0) bin = 0;
+    if (bin > n_thresh - 2) bin = n_thresh - 2;
+    return bin;
 }
 
 void histogram_mi_batch(

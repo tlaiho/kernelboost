@@ -87,8 +87,12 @@ if __name__ == "__main__":
 
     print("\nTraining kernelboost...")
     selector = SmartSelector(
+        redundancy_penalty=0.4,
         relevance_alpha=0.8,
+        temperature=0.15,
+        temperature_max=0.30,
         feature_groups=[[6, 7]],
+        constant_tree_frequency=20,
     )
 
     kb = KernelBooster(
@@ -98,7 +102,6 @@ if __name__ == "__main__":
         min_sample=700,
         n_estimators=250,
         subsample_share=0.8,
-        learning_rate=0.5,
         min_features=1,
         max_features=5,
         overlap_epsilon=0.05,
