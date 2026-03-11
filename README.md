@@ -7,7 +7,7 @@
 ![C](https://img.shields.io/badge/C-language-blue)
 ![GPU](https://img.shields.io/badge/GPU-CUDA%20C%2FCuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.1-blue)
 
 kernelboost is a gradient boosting algorithm that uses Nadaraya-Watson (local constant) kernel estimators as base learners instead of decision trees. It has:
 
@@ -122,7 +122,7 @@ lower, upper = booster.predict_intervals(X, alpha=0.1)
 variance = booster.predict_variance(X)
 ```
 
-Both interval coverage and conditional variance have a tendency to be underestimated. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
+Both interval coverage and conditional variance have a tendency to be underestimated. This is probably because the training residuals are compressed compared to true residuals. Variance prediction also supports passing in evaluation data through eval_set (X, y tuple) argument. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
 
 #### Data Preprocessing
 

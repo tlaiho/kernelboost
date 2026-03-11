@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-03-11
+
+### Added
+- `eval_set` parameter for `predict_variance()`. When provided, variance trees are fitted on evaluation set residuals instead of training residuals.
+- inverse_transform method for `RankTransformer`.
+
+### Changed
+- Code formatting in `booster.py`.
+- Code formatting in `feature_selection.py`.
+
 ## [0.3.0] - 2026-03-07
 
 ### Added

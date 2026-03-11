@@ -2,6 +2,7 @@ import numpy as np
 from .tree import KernelTree
 from .feature_selection import FeatureSelector, RandomSelector
 
+
 class KernelBooster:
     """
     Gradient boosting with local constant (Nadaraya-Watson) regressors as base learners.
@@ -21,7 +22,7 @@ class KernelBooster:
     n_estimators : int, default=None
         Number of boosting rounds. Auto-calculated from n_features if None.
     feature_tree_tuple : tuple, default=None
-        Explicit feature subsets and tree type ('kernel' or 'constant') per round. 
+        Explicit feature subsets and tree type ('kernel' or 'constant') per round.
         Takes priority over feature_selector.
     subsample_share : float, default=0.5
         Training sample share per round.
@@ -78,8 +79,8 @@ class KernelBooster:
         max_sample: int = 5000,
         min_sample: int = 500,
         overlap_epsilon: float = 0.05,
-        kernel_type: str = 'laplace',
-        precision_method: str = 'pilot-cv',
+        kernel_type: str = "laplace",
+        precision_method: str = "pilot-cv",
         pilot_factor: float = 3.0,
         search_rounds: int = 20,
         bounds: tuple = (0.10, 35.0),
@@ -89,7 +90,6 @@ class KernelBooster:
         stopping_threshold: float = 0.0,
         verbose: int = 0,
         use_gpu: bool = False,
-
     ):
         self.objective = objective
         self.feature_selector = feature_selector
@@ -120,52 +120,74 @@ class KernelBooster:
         self.use_gpu = use_gpu
 
         self.kernel_optimization = {
-            'kernel_type': kernel_type,
-            'search_rounds': search_rounds,
-            'bounds': bounds,
-            'initial_precision': initial_precision,
-            'sample_share': sample_share,
-            'precision_method': precision_method,
-            'pilot_factor': pilot_factor,
+            "kernel_type": kernel_type,
+            "search_rounds": search_rounds,
+            "bounds": bounds,
+            "initial_precision": initial_precision,
+            "sample_share": sample_share,
+            "precision_method": precision_method,
+            "pilot_factor": pilot_factor,
         }
 
         self.tree_optimization = {
-            'max_sample': max_sample,
-            'min_sample': min_sample,
-            'max_depth': max_depth,
-            'overlap_epsilon': overlap_epsilon,
+            "max_sample": max_sample,
+            "min_sample": min_sample,
+            "max_depth": max_depth,
+            "overlap_epsilon": overlap_epsilon,
         }
 
         self._validate_params()
 
     def _validate_params(self) -> None:
         """Validate hyperparameters."""
-        if self.kernel_type not in {'gaussian', 'laplace'}:
-            raise ValueError(f"kernel_type must be 'gaussian' or 'laplace', got '{self.kernel_type}'")
+        if self.kernel_type not in {"gaussian", "laplace"}:
+            raise ValueError(
+                f"kernel_type must be 'gaussian' or 'laplace', got '{self.kernel_type}'"
+            )
         if self.max_sample <= self.min_sample:
-            raise ValueError(f"max_sample ({self.max_sample}) must be > min_sample ({self.min_sample})")
+            raise ValueError(
+                f"max_sample ({self.max_sample}) must be > min_sample ({self.min_sample})"
+            )
         if self.lambda1 < 0:
             raise ValueError(f"lambda1 must be >= 0, got {self.lambda1}")
         if not 0 < self.learning_rate <= 1:
-            raise ValueError(f"learning_rate must be in (0, 1], got {self.learning_rate}")
+            raise ValueError(
+                f"learning_rate must be in (0, 1], got {self.learning_rate}"
+            )
         if not 0 < self.subsample_share <= 1:
-            raise ValueError(f"subsample_share must be in (0, 1], got {self.subsample_share}")
+            raise ValueError(
+                f"subsample_share must be in (0, 1], got {self.subsample_share}"
+            )
         if self.n_estimators is not None and self.n_estimators <= 0:
             raise ValueError(f"n_estimators must be > 0, got {self.n_estimators}")
         if self.stopping_threshold < 0:
-            raise ValueError(f"stopping_threshold must be >= 0, got {self.stopping_threshold}")
+            raise ValueError(
+                f"stopping_threshold must be >= 0, got {self.stopping_threshold}"
+            )
         if len(self.bounds) != 2 or self.bounds[0] >= self.bounds[1]:
-            raise ValueError(f"bounds must be (lower, upper) with lower < upper, got {self.bounds}")
+            raise ValueError(
+                f"bounds must be (lower, upper) with lower < upper, got {self.bounds}"
+            )
         if self.min_features < 1:
             raise ValueError(f"min_features must be >= 1, got {self.min_features}")
         if self.max_features is not None and self.max_features < self.min_features:
-            raise ValueError(f"max_features ({self.max_features}) must be >= min_features ({self.min_features})")
+            raise ValueError(
+                f"max_features ({self.max_features}) must be >= min_features ({self.min_features})"
+            )
         if self.n_iter_no_change is not None and self.n_iter_no_change <= 0:
-            raise ValueError(f"n_iter_no_change must be a positive integer or None, got {self.n_iter_no_change}")
+            raise ValueError(
+                f"n_iter_no_change must be a positive integer or None, got {self.n_iter_no_change}"
+            )
         if not (0.0 <= self.overlap_epsilon < 0.5):
-            raise ValueError(f"overlap_epsilon must be in [0.0, 0.5), got {self.overlap_epsilon}")
-        if self.feature_tree_tuple is not None and not isinstance(self.feature_tree_tuple, tuple):
-            raise ValueError(f"feature_tree_tuple: must be a tuple of (indices, tree_type) tuples")
+            raise ValueError(
+                f"overlap_epsilon must be in [0.0, 0.5), got {self.overlap_epsilon}"
+            )
+        if self.feature_tree_tuple is not None and not isinstance(
+            self.feature_tree_tuple, tuple
+        ):
+            raise ValueError(
+                f"feature_tree_tuple: must be a tuple of (indices, tree_type) tuples"
+            )
 
     def _validate_data(self, X: np.ndarray, y: np.ndarray) -> None:
         """Validate training data."""
@@ -176,9 +198,13 @@ class KernelBooster:
         if y.ndim == 2 and y.shape[1] != 1:
             raise ValueError(f"y must have shape (n,) or (n, 1), got {y.shape}")
         if X.shape[0] != y.ravel().shape[0]:
-            raise ValueError(f"X and y have different number of samples: {X.shape[0]} vs {y.ravel().shape[0]}")
+            raise ValueError(
+                f"X and y have different number of samples: {X.shape[0]} vs {y.ravel().shape[0]}"
+            )
         if X.shape[0] < self.min_sample:
-            raise ValueError(f"Not enough samples ({X.shape[0]}) for min_sample ({self.min_sample})")
+            raise ValueError(
+                f"Not enough samples ({X.shape[0]}) for min_sample ({self.min_sample})"
+            )
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
             raise ValueError("X contains NaN or infinite values")
         if np.any(np.isnan(y)) or np.any(np.isinf(y)):
@@ -186,7 +212,9 @@ class KernelBooster:
         if self.objective.is_classifier:
             unique_y = np.unique(y)
             if not np.array_equal(unique_y, np.array([0, 1])):
-                raise ValueError(f"For classification, y must contain only 0 and 1, got unique values: {unique_y}")
+                raise ValueError(
+                    f"For classification, y must contain only 0 and 1, got unique values: {unique_y}"
+                )
 
     def _set_sampling_weights(self, weights: np.ndarray | None) -> None:
         """Set sampling weights for subsampling during training."""
@@ -263,7 +291,9 @@ class KernelBooster:
         if self.feature_names is None:
             self.feature_names_ = list(range(self.n_features_in_))
         elif len(self.feature_names) != self.n_features_in_:
-            raise ValueError("The number of feature names does not match with the number of features.")
+            raise ValueError(
+                "The number of feature names does not match with the number of features."
+            )
         else:
             self.feature_names_ = self.feature_names
 
@@ -299,7 +329,7 @@ class KernelBooster:
 
         if self.verbose > 0:
             print("Finished training.")
-            
+
     def _init_training_state(self) -> None:
         """Initialize training state."""
         self._sample_size = int(self.subsample_share * self.n_samples_)
@@ -318,8 +348,11 @@ class KernelBooster:
                 self.feature_selector = selector
 
             self.n_estimators_ = selector.initialize(
-                self.X_, self.n_features_in_,
-                self.min_features, self.max_features_, self.n_estimators_
+                self.X_,
+                self.n_features_in_,
+                self.min_features,
+                self.max_features_,
+                self.n_estimators_,
             )
             self._use_selector = True
             if self.verbose > 0:
@@ -338,7 +371,7 @@ class KernelBooster:
         self.trees_, self.tree_predictions_ = [], []
         self.rho_, self.fitted_features_ = [], []
         self.gain_ = []
-        self.last_precision_ = self.kernel_optimization['initial_precision']
+        self.last_precision_ = self.kernel_optimization["initial_precision"]
         self.rseed_ = np.random.randint(100000, 1234567890, size=1)[0]
         self._rng = np.random.default_rng(self.rseed_)
 
@@ -349,9 +382,13 @@ class KernelBooster:
             self._rounds_no_improvement = 0
             self.val_losses_ = []
             if self.objective.is_classifier:
-                self.eval_predictions = np.full((self._eval_X.shape[0], 1), self.logit_mean_)
+                self.eval_predictions = np.full(
+                    (self._eval_X.shape[0], 1), self.logit_mean_
+                )
             else:
-                self.eval_predictions = np.full((self._eval_X.shape[0], 1), self.y_mean_)
+                self.eval_predictions = np.full(
+                    (self._eval_X.shape[0], 1), self.y_mean_
+                )
         else:
             self.val_losses_ = None
             self.eval_predictions = None
@@ -364,7 +401,9 @@ class KernelBooster:
 
         # get features and leaf type for this round
         if self._use_selector:
-            feature_indices, tree_type = self.feature_selector.get_features(round_idx, pseudoresiduals)
+            feature_indices, tree_type = self.feature_selector.get_features(
+                round_idx, pseudoresiduals
+            )
         else:
             feature_indices, tree_type = self.feature_tree_tuple_[round_idx]
 
@@ -375,7 +414,7 @@ class KernelBooster:
             size=self._sample_size,
             p=self.sampling_weights_,
             replace=False,
-            shuffle=False
+            shuffle=False,
         )
 
         self.kernel_optimization.update({"initial_precision": self.last_precision_})
@@ -392,11 +431,14 @@ class KernelBooster:
         # store tree predictions for hyperparameter optimization
         self.tree_predictions_.append(self.trees_[-1].predict(training_features))
 
-        if tree_type == 'kernel':
+        if tree_type == "kernel":
             precisions = [
-                est.precision_ for est, is_kern in zip(
-                    self.trees_[-1].compiled_.estimators, self.trees_[-1].compiled_.is_kernel
-                ) if is_kern
+                est.precision_
+                for est, is_kern in zip(
+                    self.trees_[-1].compiled_.estimators,
+                    self.trees_[-1].compiled_.is_kernel,
+                )
+                if is_kern
             ]
             if precisions:
                 self.last_precision_ = np.mean(precisions)
@@ -427,7 +469,7 @@ class KernelBooster:
         # update feature selector with results
         if self._use_selector:
             self.feature_selector.update(feature_indices, self.gain_[-1])
-        
+
     def _should_stop(self, m: int) -> bool:
         """Check if training should stop."""
         if m >= self.n_estimators_:
@@ -437,7 +479,9 @@ class KernelBooster:
         if self._eval_X is not None:
             if self._check_validation_stopping(m):
                 if self.verbose > 0:
-                    print(f"Early stopping: validation loss did not improve for {self.n_iter_no_change} rounds.")
+                    print(
+                        f"Early stopping: validation loss did not improve for {self.n_iter_no_change} rounds."
+                    )
                 self.stopped_early_ = True
                 return True
             return False
@@ -471,14 +515,16 @@ class KernelBooster:
             self._rounds_no_improvement += 1
 
         if self.verbose > 0:
-            print(f"Validation loss: {val_loss:.5f} (best: {self._best_val_loss:.5f} at round {self._best_round + 1})")
+            print(
+                f"Validation loss: {val_loss:.5f} (best: {self._best_val_loss:.5f} at round {self._best_round + 1})"
+            )
 
         return self._rounds_no_improvement >= self.n_iter_no_change
 
     def _check_rho_stopping(self, m: int) -> bool:
         """Check if training should stop based on rho heuristic."""
         if m >= self.n_iter_no_change:
-            mean_rho = np.mean(np.abs(self.rho_[-self.n_iter_no_change:]))
+            mean_rho = np.mean(np.abs(self.rho_[-self.n_iter_no_change :]))
             if mean_rho < self.stopping_threshold:
                 return True
         return False
@@ -509,7 +555,7 @@ class KernelBooster:
         np.ndarray of shape (n_samples,)
             Predicted logits.
         """
-        if not hasattr(self, 'trees_'):
+        if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
         n = X.shape[0]
@@ -519,7 +565,9 @@ class KernelBooster:
         for i in range(n_trees):
             prediction_features = X[:, self.fitted_features_[i]]
             if self.rho_[i] != 0:
-                predictions += self.rho_[i] * self.trees_[i].predict(prediction_features).ravel()
+                predictions += (
+                    self.rho_[i] * self.trees_[i].predict(prediction_features).ravel()
+                )
 
         if self.objective.is_classifier:
             predictions += self.logit_mean_.item()
@@ -545,25 +593,29 @@ class KernelBooster:
         np.ndarray of shape (n_samples,)
             Predicted probabilities.
         """
-        if not hasattr(self, 'trees_'):
+        if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
         if not self.objective.is_classifier:
-            raise ValueError("predict_proba only available for classification objectives")
+            raise ValueError(
+                "predict_proba only available for classification objectives"
+            )
 
         raw_predictions = self.predict(X)
         return self.objective.logits_to_probability(raw_predictions)
 
-    def fit_predict(self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray = None) -> np.ndarray:
+    def fit_predict(
+        self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray = None
+    ) -> np.ndarray:
         """Fit and return predictions on X."""
         return self.fit(X, y, sample_weight).predict(X)
-    
+
     def predict_intervals(
         self,
         X: np.ndarray,
         alpha: float = 0.1,
         proba: bool = True,
         n_trees: int = None,
-        aggregation: str = 'conservative'
+        aggregation: str = "conservative",
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         EXPERIMENTAL. Get prediction intervals using residual quantiles from last active trees.
@@ -594,7 +646,7 @@ class KernelBooster:
         upper : np.ndarray of shape (n_samples,)
             Upper bounds of prediction intervals.
         """
-        if not hasattr(self, 'trees_'):
+        if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
         if not 0 < alpha < 1:
@@ -603,8 +655,10 @@ class KernelBooster:
         if self.last_active_tree_idx_ is None:
             raise RuntimeError("No active trees found (all rho values are zero)")
 
-        if aggregation not in ('conservative', 'mean'):
-            raise ValueError(f"aggregation must be 'conservative' or 'mean', got {aggregation}")
+        if aggregation not in ("conservative", "mean"):
+            raise ValueError(
+                f"aggregation must be 'conservative' or 'mean', got {aggregation}"
+            )
 
         # default: use up to 5 trees
         if n_trees is None:
@@ -625,12 +679,13 @@ class KernelBooster:
             lowers[i] = predictions + bounds[:, 0]
             uppers[i] = predictions + bounds[:, 1]
 
-        if aggregation == 'conservative':
-            lower = np.min(lowers, axis=0)
-            upper = np.max(uppers, axis=0)
-        else:
+        if aggregation == "mean":
             lower = np.mean(lowers, axis=0)
             upper = np.mean(uppers, axis=0)
+        else:
+            lower = np.min(lowers, axis=0)
+            upper = np.max(uppers, axis=0)
+
 
         if self.objective.is_classifier and proba:
             lower = self.objective.logits_to_probability(lower)
@@ -642,7 +697,8 @@ class KernelBooster:
         self,
         X: np.ndarray,
         n_trees: int = None,
-        aggregation: str = 'max'
+        aggregation: str = "max",
+        eval_set: tuple = None,
     ) -> np.ndarray:
         """
         Predict conditional variance using Fan & Yao (1998) double kernel estimation.
@@ -658,15 +714,18 @@ class KernelBooster:
             How to combine variances from multiple trees:
             - 'max': maximum variance (most conservative)
             - 'mean': average variance
+        eval_set : tuple of (X_val, y_val), optional.
+            If provided variance estimation will be done on this dataset
+            instead of training data.
 
         Returns:
         variance : np.ndarray of shape (n_samples,)
             Variance estimates for each sample.
         """
-        if not hasattr(self, 'trees_'):
+        if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
-        if aggregation not in ('max', 'mean'):
+        if aggregation not in ("max", "mean"):
             raise ValueError(f"aggregation must be 'max' or 'mean', got {aggregation}")
 
         if self.last_active_tree_idx_ is None:
@@ -676,8 +735,8 @@ class KernelBooster:
             n_trees = min(5, self.last_active_tree_idx_ + 1)
 
         # fit variance trees on first call
-        if not hasattr(self, 'variance_trees_') or self.variance_trees_ is None:
-            self._fit_variance_trees(n_trees)
+        if not hasattr(self, "variance_trees_") or self.variance_trees_ is None:
+            self._fit_variance_trees(n_trees, eval_set)
 
         n_samples = X.shape[0]
         variances = np.zeros((len(self.variance_trees_), n_samples))
@@ -690,15 +749,19 @@ class KernelBooster:
         if len(self.variance_trees_) == 1:
             return np.maximum(variances[0], 0.0)
 
-        if aggregation == 'max':
+        if aggregation == "max":
             return np.maximum(np.max(variances, axis=0), 0.0)
         else:
             return np.maximum(np.mean(variances, axis=0), 0.0)
 
-    def _fit_variance_trees(self, n_trees: int) -> None:
+    def _fit_variance_trees(self, n_trees: int, eval_set: tuple = None) -> None:
         """Fit KernelTrees on squared residuals for Fan & Yao variance estimation."""
-        residuals = self.y_.ravel() - self.predict(self.X_).ravel()
-        squared_residuals = residuals ** 2
+        if eval_set:
+            residuals = eval_set[1].ravel() - self.predict(eval_set[0]).ravel()
+        else:
+            residuals = self.y_.ravel() - self.predict(self.X_).ravel()
+
+        squared_residuals = residuals**2
 
         tree_indices = self._last_n_active_tree_indices(n_trees)
 
@@ -732,7 +795,7 @@ class KernelBooster:
 
     def score(self, X: np.ndarray, y: np.ndarray) -> float:
         """Return default score for the objective."""
-        if not hasattr(self, 'trees_'):
+        if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
         predictions = self.predict(X)
@@ -742,30 +805,30 @@ class KernelBooster:
         """Get parameters for this estimator."""
         # deep kept for compatibility
         return {
-            'objective': self.objective,
-            'feature_names': self.feature_names,
-            'feature_tree_tuple': self.feature_tree_tuple,
-            'feature_selector': self.feature_selector,
-            'max_depth': self.max_depth,
-            'max_sample': self.max_sample,
-            'min_sample': self.min_sample,
-            'use_gpu': self.use_gpu,
-            'kernel_type': self.kernel_type,
-            'lambda1': self.lambda1,
-            'learning_rate': self.learning_rate,
-            'n_estimators': self.n_estimators,
-            'verbose': self.verbose,
-            'search_rounds': self.search_rounds,
-            'bounds': self.bounds,
-            'initial_precision': self.initial_precision,
-            'sample_share': self.sample_share,
-            'precision_method': self.precision_method,
-            'subsample_share': self.subsample_share,
-            'stopping_threshold': self.stopping_threshold,
-            'min_features': self.min_features,
-            'max_features': self.max_features,
-            'n_iter_no_change': self.n_iter_no_change,
-            'overlap_epsilon': self.overlap_epsilon,
+            "objective": self.objective,
+            "feature_names": self.feature_names,
+            "feature_tree_tuple": self.feature_tree_tuple,
+            "feature_selector": self.feature_selector,
+            "max_depth": self.max_depth,
+            "max_sample": self.max_sample,
+            "min_sample": self.min_sample,
+            "use_gpu": self.use_gpu,
+            "kernel_type": self.kernel_type,
+            "lambda1": self.lambda1,
+            "learning_rate": self.learning_rate,
+            "n_estimators": self.n_estimators,
+            "verbose": self.verbose,
+            "search_rounds": self.search_rounds,
+            "bounds": self.bounds,
+            "initial_precision": self.initial_precision,
+            "sample_share": self.sample_share,
+            "precision_method": self.precision_method,
+            "subsample_share": self.subsample_share,
+            "stopping_threshold": self.stopping_threshold,
+            "min_features": self.min_features,
+            "max_features": self.max_features,
+            "n_iter_no_change": self.n_iter_no_change,
+            "overlap_epsilon": self.overlap_epsilon,
         }
 
     def set_params(self, **params) -> "KernelBooster":
@@ -778,20 +841,20 @@ class KernelBooster:
                 setattr(self, key, value)
 
         self.kernel_optimization = {
-            'kernel_type': self.kernel_type,
-            'search_rounds': self.search_rounds,
-            'bounds': self.bounds,
-            'initial_precision': self.initial_precision,
-            'sample_share': self.sample_share,
-            'precision_method': self.precision_method,
-            'pilot_factor': self.pilot_factor,
+            "kernel_type": self.kernel_type,
+            "search_rounds": self.search_rounds,
+            "bounds": self.bounds,
+            "initial_precision": self.initial_precision,
+            "sample_share": self.sample_share,
+            "precision_method": self.precision_method,
+            "pilot_factor": self.pilot_factor,
         }
 
         self.tree_optimization = {
-            'max_sample': self.max_sample,
-            'min_sample': self.min_sample,
-            'max_depth': self.max_depth,
-            'overlap_epsilon': self.overlap_epsilon,
+            "max_sample": self.max_sample,
+            "min_sample": self.min_sample,
+            "max_depth": self.max_depth,
+            "overlap_epsilon": self.overlap_epsilon,
         }
 
         self._validate_params()
@@ -801,23 +864,26 @@ class KernelBooster:
     def _set_gpu(self, value: bool) -> None:
         """Set GPU usage for all fitted kernel estimators."""
         for ktree in self.trees_:
-            for est, is_kern in zip(ktree.compiled_.estimators, ktree.compiled_.is_kernel):
+            for est, is_kern in zip(
+                ktree.compiled_.estimators, ktree.compiled_.is_kernel
+            ):
                 if is_kern:
                     est.use_gpu = value
 
         self.use_gpu = value
 
-        if hasattr(self, 'variance_trees_') and self.variance_trees_ is not None:
+        if hasattr(self, "variance_trees_") and self.variance_trees_ is not None:
             for vtree in self.variance_trees_:
-                for est, is_kern in zip(vtree.compiled_.estimators, vtree.compiled_.is_kernel):
+                for est, is_kern in zip(
+                    vtree.compiled_.estimators, vtree.compiled_.is_kernel
+                ):
                     if is_kern:
                         est.use_gpu = value
-
 
     @property
     def feature_importances_(self) -> np.ndarray:
         """Feature importance based on aggregated |rho| values."""
-        if not hasattr(self, 'trees_'):
+        if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
         importances = np.zeros(self.n_features_in_)
         for feature_indices, rho in zip(self.fitted_features_, self.rho_):

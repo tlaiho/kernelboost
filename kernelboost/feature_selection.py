@@ -33,11 +33,11 @@ _mi_lib.histogram_mi_batch.restype = None
 _mi_lib.histogram_mi_batch.argtypes = (
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # X
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # residuals
-    ctypes.c_int,                                       # n
-    ctypes.c_int,                                       # n_features
+    ctypes.c_int,  # n
+    ctypes.c_int,  # n_features
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # x_thresholds
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # y_thresholds
-    ctypes.c_int,                                       # n_thresh
+    ctypes.c_int,  # n_thresh
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # out_mi
 )
 
@@ -84,7 +84,9 @@ class FeatureSelector(ABC):
         pass
 
     @abstractmethod
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> tuple[list[int], str]:
+    def get_features(
+        self, round_idx: int, residuals: np.ndarray
+    ) -> tuple[list[int], str]:
         """
         Get feature indices and tree type for the next boosting round.
 
@@ -136,7 +138,9 @@ class RandomSelector(FeatureSelector):
         Groups of features that should be selected together.
     """
 
-    def __init__(self, seed: int | None = None, feature_groups: list[list[int]] | None = None):
+    def __init__(
+        self, seed: int | None = None, feature_groups: list[list[int]] | None = None
+    ):
         super().__init__()
         self.seed = seed if seed is not None else np.random.randint(0, 2**31)
         self.feature_groups = feature_groups
@@ -151,9 +155,11 @@ class RandomSelector(FeatureSelector):
     ) -> int:
         self.n_features = n_features
         self._rng = np.random.default_rng(self.seed)
-        self._gen = self._feature_generator(n_features, min_features, max_features, rounds)
+        self._gen = self._feature_generator(
+            n_features, min_features, max_features, rounds
+        )
         return rounds
-    
+
     def _feature_generator(
         self, n_features: int, min_features: int, max_features: int, rounds: int
     ) -> Generator[list[int], None, None]:
@@ -176,7 +182,9 @@ class RandomSelector(FeatureSelector):
             self._rng.shuffle(features)
             yield features[:max_size].tolist()
 
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> tuple[list[int], str]:
+    def get_features(
+        self, round_idx: int, residuals: np.ndarray
+    ) -> tuple[list[int], str]:
         selected = next(self._gen)
         return self._complete_groups(selected), "kernel"
 
@@ -249,23 +257,27 @@ class SmartSelector(FeatureSelector):
         self.X_ = X.view()
         self.n_bins_ = max(10, int(np.sqrt(X.shape[0] / 5)))
         self.rounds_ = rounds
-        self.schedule_rounds_ = max(1, rounds) if self.temperature_max is not None else None
+        self.schedule_rounds_ = (
+            max(1, rounds) if self.temperature_max is not None else None
+        )
 
         self.corr_matrix_ = np.corrcoef(X, rowvar=False)
         self.corr_matrix_ = np.nan_to_num(self.corr_matrix_, nan=0.0)
 
-        # precompute quantile thresholds for each feature (fixed count for C compatibility)
+        # precompute quantile thresholds for each feature
         self.quantiles = np.linspace(0, 1, self.n_bins_ + 1)
         self.n_thresh_ = self.n_bins_ + 1
-        self.x_thresholds_ = np.array([
-            np.quantile(X[:, f], self.quantiles)
-            for f in range(n_features)
-        ], dtype=np.float32)
+        self.x_thresholds_ = np.array(
+            [np.quantile(X[:, f], self.quantiles) for f in range(n_features)],
+            dtype=np.float32,
+        )
 
         self.feature_weights_ = np.zeros(n_features)
         self.recency_scores_ = np.zeros(n_features)
         self._rng = np.random.default_rng(self.seed)
-        self._size_gen = self._size_generator(n_features, min_features, max_features, rounds)
+        self._size_gen = self._size_generator(
+            n_features, min_features, max_features, rounds
+        )
         return rounds
 
     def _size_generator(
@@ -332,9 +344,9 @@ class SmartSelector(FeatureSelector):
         weights_norm = self.feature_weights_ / (self.feature_weights_.max() + 1e-10)
 
         relevance = (
-            self.relevance_alpha * scores_norm +
-            (1 - self.relevance_alpha) * weights_norm -
-            self.recency_penalty * self.recency_scores_
+            self.relevance_alpha * scores_norm
+            + (1 - self.relevance_alpha) * weights_norm
+            - self.recency_penalty * self.recency_scores_
         )
         return np.maximum(relevance, 0.0)
 
@@ -343,9 +355,13 @@ class SmartSelector(FeatureSelector):
         if self.schedule_rounds_ is None:
             return self.temperature
         progress = min(round_idx / self.schedule_rounds_, 1.0)
-        return self.temperature_max + (self.temperature - self.temperature_max) * progress
+        return (
+            self.temperature_max + (self.temperature - self.temperature_max) * progress
+        )
 
-    def _select_features(self, k: int, relevance: np.ndarray, round_idx: int) -> list[int]:
+    def _select_features(
+        self, k: int, relevance: np.ndarray, round_idx: int
+    ) -> list[int]:
         """Select k features probabilistically using relevance and redundancy."""
         temp = self._get_temperature(round_idx)
         selected = []
@@ -357,9 +373,9 @@ class SmartSelector(FeatureSelector):
             scores = np.zeros(len(available))
             for i, j in enumerate(available):
                 if selected:
-                    redundancy = np.mean([
-                        abs(self.corr_matrix_[j, s]) for s in selected
-                    ])
+                    redundancy = np.mean(
+                        [abs(self.corr_matrix_[j, s]) for s in selected]
+                    )
                 else:
                     redundancy = 0.0
 
