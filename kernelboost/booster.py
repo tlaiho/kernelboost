@@ -775,8 +775,9 @@ class KernelBooster:
                 use_gpu=self.use_gpu,
                 **self.kernel_optimization,
             )
+            X_fit = eval_set[0] if eval_set else self.X_
             var_tree.fit(
-                self.X_[:, features],
+                X_fit[:, features],
                 squared_residuals.reshape(-1, 1),
             )
             self.variance_trees_.append(var_tree)

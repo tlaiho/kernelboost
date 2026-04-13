@@ -199,8 +199,8 @@ def estimate_bounds(
     # AMISE bandwidths
     C = (RK * sigma_sq * inv_densities / (muK**2 * curvatures)) ** 0.2
     h_opts = C * n ** (-1.0 / (d + 4))
-    h_opt = float(np.median(h_opts))
-
+    h_opt = max(float(np.median(h_opts)), 1e-5)
+    
     # convert bandwidth to precision
     if kernel_type == "gaussian":
         p = 1.0 / h_opt**2
@@ -210,7 +210,7 @@ def estimate_bounds(
     lower = max(p / factor, bounds[0])
     upper = min(p * factor, bounds[1])
 
-    if h_opt < 1e-5 or upper - lower <= 0.1:
+    if upper - lower <= 0.1:
         return bounds
 
     return (lower, upper)
