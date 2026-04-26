@@ -211,6 +211,11 @@ class SmartSelector(FeatureSelector):
         Decays linearly from temperature_max to temperature over all rounds.
     weight_decay : float, default=0.95
         Decay factor for feature weights each round.
+    relative_mi_floor : float, default=0.0
+        Quantile of MI used to prune features from the candidate set each round.
+    absolute_mi_floor : float, default=0.0
+        Absolute MI value below which features are pruned from the candidate
+        set each round.
     feature_groups : list[list[int]] | None, default=None
         Groups of features that should be selected together.
     constant_tree_frequency : int, default=25
@@ -228,6 +233,8 @@ class SmartSelector(FeatureSelector):
         temperature: float = 0.3,
         temperature_max: float | None = None,
         weight_decay: float = 0.95,
+        relative_mi_floor: float = 0.0,
+        absolute_mi_floor: float = 0.0,
         feature_groups: list[list[int]] | None = None,
         constant_tree_frequency: int = 25,
         seed: int | None = None,
@@ -240,6 +247,8 @@ class SmartSelector(FeatureSelector):
         self.temperature = temperature
         self.temperature_max = temperature_max
         self.weight_decay = weight_decay
+        self.relative_mi_floor = relative_mi_floor
+        self.absolute_mi_floor = absolute_mi_floor
         self.feature_groups = feature_groups
         self.seed = seed if seed is not None else np.random.randint(0, 2**31)
 
@@ -306,8 +315,8 @@ class SmartSelector(FeatureSelector):
         else:
             tree_type = "kernel"
             n_features = next(self._size_gen)
-            relevance = self._compute_relevance(residuals)
-            selected = self._select_features(n_features, relevance, round_idx)
+            relevance, raw_mi = self._compute_relevance(residuals)
+            selected = self._select_features(n_features, relevance, raw_mi, round_idx)
 
         return self._complete_groups(selected), tree_type
 
@@ -322,8 +331,11 @@ class SmartSelector(FeatureSelector):
             for idx in feature_indices:
                 self.feature_weights_[idx] += weight_increment
 
-    def _compute_relevance(self, pseudoresiduals: np.ndarray) -> np.ndarray:
-        """Compute relevance scores from MI with residuals, history, and recency."""
+    def _compute_relevance(
+        self, pseudoresiduals: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute relevance scores from MI with residuals, history, and recency.
+        Returns (relevance, raw_mi)."""
         residuals = np.ascontiguousarray(pseudoresiduals.ravel(), dtype=np.float32)
         y_thresholds = np.quantile(residuals, self.quantiles).astype(np.float32)
 
@@ -348,7 +360,16 @@ class SmartSelector(FeatureSelector):
             + (1 - self.relevance_alpha) * weights_norm
             - self.recency_penalty * self.recency_scores_
         )
-        return np.maximum(relevance, 0.0)
+        return np.maximum(relevance, 0.0), raw_scores
+
+    def _apply_mi_floor(self, k: int, raw_mi: np.ndarray) -> list[int]:
+        """Prune features below the MI floor, but keep at least k."""
+        relative_cutoff = float(np.quantile(raw_mi, self.relative_mi_floor))
+        cutoff = max(relative_cutoff, self.absolute_mi_floor)
+        available = [int(j) for j in np.where(raw_mi >= cutoff)[0]]
+        if len(available) < k:
+            available = [int(j) for j in np.argsort(raw_mi)[::-1][:k]]
+        return available
 
     def _get_temperature(self, round_idx: int) -> float:
         """Compute temperature for the current round."""
@@ -360,12 +381,12 @@ class SmartSelector(FeatureSelector):
         )
 
     def _select_features(
-        self, k: int, relevance: np.ndarray, round_idx: int
+        self, k: int, relevance: np.ndarray, raw_mi: np.ndarray, round_idx: int
     ) -> list[int]:
         """Select k features probabilistically using relevance and redundancy."""
         temp = self._get_temperature(round_idx)
         selected = []
-        available = list(range(self.n_features))
+        available = self._apply_mi_floor(k, raw_mi)
 
         for _ in range(min(k, self.n_features)):
             if not available:

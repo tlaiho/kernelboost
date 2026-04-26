@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-04-26
+
+### Added
+- `relative_mi_floor` and `absolute_mi_floor` parameters in `SmartSelector`. Each round, features below the cutoffs are pruned from the candidate set before probabilistic selection. Both default to 0.0 (off).
+
+### Fixed
+- Bug in pilot function estimation in `optimizer.py`.
+- Bug in `KernelBooster.predict_variance()`.
+
 ## [0.3.1] - 2026-03-11
 
 ### Added

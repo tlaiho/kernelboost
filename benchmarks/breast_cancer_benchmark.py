@@ -58,6 +58,8 @@ if __name__ == "__main__":
     #  kernelboost 
     selector = SmartSelector(
         relevance_alpha=0.7,
+        temperature=0.4,
+        relative_mi_floor=0.3,
     )
 
     kb = KernelBooster(
