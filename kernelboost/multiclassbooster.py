@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 from .booster import KernelBooster
 from .objectives import EntropyObjective
@@ -369,7 +370,9 @@ class MulticlassBooster:
             booster = KernelBooster(
                 objective=objective,
                 feature_names=feature_names_dict[cls],
-                feature_selector=self.feature_selector,
+                feature_selector=copy.deepcopy(self.feature_selector)
+                if self.feature_selector is not None
+                else None,
                 min_features=self.min_features,
                 max_features=self.max_features,
                 n_estimators=n_estimators_,

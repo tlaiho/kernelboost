@@ -1,6 +1,7 @@
 import numpy as np
 from .tree import KernelTree
 from .feature_selection import FeatureSelector, RandomSelector
+from .feature_construction import ColumnSelector
 
 
 class KernelBooster:
@@ -316,7 +317,7 @@ class KernelBooster:
 
         for m in range(self.n_estimators_):
             self._train_single_round(m)
-            self._log_round(m, self.fitted_features_[-1])
+            self._log_round(m, self.feature_constructors_[-1])
 
             if self._should_stop(m + 1):
                 break
@@ -369,7 +370,7 @@ class KernelBooster:
         self.objective_ = [self.objective(self.y_, self.predictions_)]
 
         self.trees_, self.tree_predictions_ = [], []
-        self.rho_, self.fitted_features_ = [], []
+        self.rho_, self.feature_constructors_ = [], []
         self.gain_ = []
         self.last_precision_ = self.kernel_optimization["initial_precision"]
         self.rseed_ = np.random.randint(100000, 1234567890, size=1)[0]
@@ -399,15 +400,16 @@ class KernelBooster:
         """Execute one boosting iteration."""
         pseudoresiduals = self.objective.gradient(self.y_, self.predictions_)
 
-        # get features and leaf type for this round
+        # get feature constructor and leaf type for this round
         if self._use_selector:
-            feature_indices, tree_type = self.feature_selector.get_features(
+            constructor, tree_type = self.feature_selector.get_features(
                 round_idx, pseudoresiduals
             )
         else:
-            feature_indices, tree_type = self.feature_tree_tuple_[round_idx]
+            indices, tree_type = self.feature_tree_tuple_[round_idx]
+            constructor = ColumnSelector(indices)
 
-        training_features = self.X_[:, feature_indices]
+        training_features = constructor.transform(self.X_)
         all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
         training_data = self._rng.choice(
             all_data,
@@ -455,7 +457,7 @@ class KernelBooster:
             )
         )
 
-        self.fitted_features_.append(feature_indices)
+        self.feature_constructors_.append(constructor)
 
         # apply results only if rho is non-zero
         if self.rho_[-1] != 0:
@@ -468,7 +470,7 @@ class KernelBooster:
 
         # update feature selector with results
         if self._use_selector:
-            self.feature_selector.update(feature_indices, self.gain_[-1])
+            self.feature_selector.update(constructor, self.gain_[-1])
 
     def _should_stop(self, m: int) -> bool:
         """Check if training should stop."""
@@ -497,8 +499,8 @@ class KernelBooster:
 
     def _check_validation_stopping(self, m: int) -> bool:
         """Update validation score tracking after a round."""
-        # get validation features for the current tree's feature indices
-        val_features = self._eval_X[:, self.fitted_features_[-1]]
+        # materialize validation features for the current round's constructor
+        val_features = self.feature_constructors_[-1].transform(self._eval_X)
 
         val_tree_preds = self.trees_[-1].predict(val_features)
         if self.rho_[-1] != 0:
@@ -529,17 +531,18 @@ class KernelBooster:
                 return True
         return False
 
-    def _log_round(self, m: int, feature_indices: list[int]) -> None:
+    def _log_round(self, m: int, constructor) -> None:
         """Log training progress for one round."""
         if self.verbose <= 0:
             return
 
-        current_features = [self.feature_names_[k] for k in feature_indices]
+        desc = constructor.describe(self.feature_names_)
+        n_feat = len(constructor.source_features)
         rho = self.rho_[-1]
         obj = self.objective_[-1]
         gain = self.gain_[-1]
         print(
-            f"Round {m + 1}: {len(current_features)} features {current_features} | "
+            f"Round {m + 1}: {n_feat} features {desc} | "
             f"rho={rho:.4f}, obj={obj:.5f}, gain={gain:.4f}"
         )
 
@@ -563,7 +566,7 @@ class KernelBooster:
         n_trees = self.best_round_ if self.best_round_ is not None else len(self.trees_)
 
         for i in range(n_trees):
-            prediction_features = X[:, self.fitted_features_[i]]
+            prediction_features = self.feature_constructors_[i].transform(X)
             if self.rho_[i] != 0:
                 predictions += (
                     self.rho_[i] * self.trees_[i].predict(prediction_features).ravel()
@@ -674,8 +677,8 @@ class KernelBooster:
 
         for i, idx in enumerate(tree_indices):
             tree = self.trees_[idx]
-            features = self.fitted_features_[idx]
-            bounds = tree.predict_quantiles(X[:, features], quantiles=quantiles)
+            constructor = self.feature_constructors_[idx]
+            bounds = tree.predict_quantiles(constructor.transform(X), quantiles=quantiles)
             lowers[i] = predictions + bounds[:, 0]
             uppers[i] = predictions + bounds[:, 1]
 
@@ -741,10 +744,10 @@ class KernelBooster:
         n_samples = X.shape[0]
         variances = np.zeros((len(self.variance_trees_), n_samples))
 
-        for i, (vtree, features) in enumerate(
-            zip(self.variance_trees_, self.variance_features_)
+        for i, (vtree, constructor) in enumerate(
+            zip(self.variance_trees_, self.variance_constructors_)
         ):
-            variances[i] = vtree.predict(X[:, features]).ravel()
+            variances[i] = vtree.predict(constructor.transform(X)).ravel()
 
         if len(self.variance_trees_) == 1:
             return np.maximum(variances[0], 0.0)
@@ -766,10 +769,10 @@ class KernelBooster:
         tree_indices = self._last_n_active_tree_indices(n_trees)
 
         self.variance_trees_ = []
-        self.variance_features_ = []
+        self.variance_constructors_ = []
 
         for idx in tree_indices:
-            features = self.fitted_features_[idx]
+            constructor = self.feature_constructors_[idx]
             var_tree = KernelTree(
                 **self.tree_optimization,
                 use_gpu=self.use_gpu,
@@ -777,11 +780,11 @@ class KernelBooster:
             )
             X_fit = eval_set[0] if eval_set else self.X_
             var_tree.fit(
-                X_fit[:, features],
+                constructor.transform(X_fit),
                 squared_residuals.reshape(-1, 1),
             )
             self.variance_trees_.append(var_tree)
-            self.variance_features_.append(features)
+            self.variance_constructors_.append(constructor)
 
     def _last_n_active_tree_indices(self, n: int) -> list[int]:
         """Find indices of last n trees with non-zero rho."""
@@ -887,8 +890,8 @@ class KernelBooster:
         if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
         importances = np.zeros(self.n_features_in_)
-        for feature_indices, rho in zip(self.fitted_features_, self.rho_):
-            for idx in feature_indices:
+        for constructor, rho in zip(self.feature_constructors_, self.rho_):
+            for idx in constructor.source_features:
                 importances[idx] += abs(rho)
         total = importances.sum()
         if total > 0:

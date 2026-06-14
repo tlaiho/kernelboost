@@ -3,9 +3,9 @@ from collections.abc import Generator
 import ctypes
 import os
 import platform
-
 import numpy as np
 from numpy.ctypeslib import ndpointer
+from .feature_construction import FeatureConstructor, ColumnSelector
 
 # Load C library for fast MI computation
 _dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -86,9 +86,9 @@ class FeatureSelector(ABC):
     @abstractmethod
     def get_features(
         self, round_idx: int, residuals: np.ndarray
-    ) -> tuple[list[int], str]:
+    ) -> tuple[FeatureConstructor, str]:
         """
-        Get feature indices and tree type for the next boosting round.
+        Get the feature constructor and tree type for the next boosting round.
 
         Args:
         round_idx : int
@@ -97,18 +97,18 @@ class FeatureSelector(ABC):
             Current pseudo-residuals (n_samples,)
 
         Returns:
-        tuple[list[int], str]
-            Feature indices and leaf type ('kernel' or 'constant')
+        tuple[FeatureConstructor, str]
+            Feature constructor for this round and leaf type ('kernel' or 'constant')
         """
         pass
 
-    def update(self, feature_indices: list[int], gain: float) -> None:
+    def update(self, constructor: FeatureConstructor, gain: float) -> None:
         """
         Update internal state after a round completes.
 
         Args:
-        feature_indices : list[int]
-            Features used in the completed round
+        constructor : FeatureConstructor
+            Constructor used in the completed round
         gain : float
             Loss reduction achieved in this round
         """
@@ -184,9 +184,9 @@ class RandomSelector(FeatureSelector):
 
     def get_features(
         self, round_idx: int, residuals: np.ndarray
-    ) -> tuple[list[int], str]:
+    ) -> tuple[FeatureConstructor, str]:
         selected = next(self._gen)
-        return self._complete_groups(selected), "kernel"
+        return ColumnSelector(self._complete_groups(selected)), "kernel"
 
 
 class SmartSelector(FeatureSelector):
@@ -308,7 +308,9 @@ class SmartSelector(FeatureSelector):
         while True:
             yield max_size
 
-    def get_features(self, round_idx: int, residuals: np.ndarray) -> list[int]:
+    def get_features(
+        self, round_idx: int, residuals: np.ndarray
+    ) -> tuple[FeatureConstructor, str]:
         if round_idx > 0 and round_idx % self.constant_frequency == 0:
             tree_type = "constant"
             selected = list(range(self.n_features))
@@ -318,17 +320,18 @@ class SmartSelector(FeatureSelector):
             relevance, raw_mi = self._compute_relevance(residuals)
             selected = self._select_features(n_features, relevance, raw_mi, round_idx)
 
-        return self._complete_groups(selected), tree_type
+        return ColumnSelector(self._complete_groups(selected)), tree_type
 
-    def update(self, feature_indices: list[int], gain: float) -> None:
+    def update(self, constructor: FeatureConstructor, gain: float) -> None:
+        indices = list(constructor.source_features)
         self.recency_scores_ *= self.recency_decay
-        for idx in feature_indices:
+        for idx in indices:
             self.recency_scores_[idx] = 1.0
 
         self.feature_weights_ *= self.weight_decay
         if gain > 0:
-            weight_increment = gain / len(feature_indices)
-            for idx in feature_indices:
+            weight_increment = gain / len(indices)
+            for idx in indices:
                 self.feature_weights_[idx] += weight_increment
 
     def _compute_relevance(

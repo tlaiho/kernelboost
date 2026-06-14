@@ -44,8 +44,8 @@ class RhoOptimizer:
         Z = np.zeros((n_samples, n_trees))
 
         for i in range(n_trees):
-            kernel_indices = self.booster_.fitted_features_[i]
-            tree_features = X[:, kernel_indices]
+            constructor = self.booster_.feature_constructors_[i]
+            tree_features = constructor.transform(X)
             Z[:, i] = self.booster_.trees_[i].predict(tree_features).ravel()
 
         return Z
@@ -460,8 +460,8 @@ class RhoOptimizer:
         # refit each tree
         for i in range(n_trees):
             pseudoresiduals = objective.gradient(y, predictions)
-            kernel_indices = booster.fitted_features_[i]
-            training_features = X[:, kernel_indices]
+            constructor = booster.feature_constructors_[i]
+            training_features = constructor.transform(X)
 
             all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
 
