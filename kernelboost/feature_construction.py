@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-
 import numpy as np
 
 
@@ -58,9 +57,10 @@ class ColumnSelector(FeatureConstructor):
         self._freeze()
 
     def transform(self, X: np.ndarray) -> np.ndarray:
-        # X[:, indices] on a float32 C-contiguous X returns a float32 C-contiguous
-        # copy, matching the previous self.X_[:, feature_indices] behavior.
-        return X[:, self.indices]
+        # NumPy advanced indexing X[:, indices] returns an F-contiguous array for
+        # multi-column selections, so wrap in ascontiguousarray to honor the
+        # C-contiguous guarantee the C/GPU kernels rely on.
+        return np.ascontiguousarray(X[:, self.indices], dtype=np.float32)
 
     @property
     def source_features(self) -> set[int]:
