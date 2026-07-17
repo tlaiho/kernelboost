@@ -374,6 +374,8 @@ class KernelBooster:
         self.subsample_indices_ = []
         self.variance_trees_ = None
         self.variance_constructors_ = None
+        self.quantile_trees_ = None
+        self.quantile_constructors_ = None
         self.loo_gap_ = None
         self.last_precision_ = self.kernel_optimization["initial_precision"]
         self.rseed_ = np.random.randint(100000, 1234567890, size=1)[0]
@@ -613,85 +615,110 @@ class KernelBooster:
         self,
         X: np.ndarray,
         alpha: float = 0.1,
-        proba: bool = True,
         n_trees: int = None,
-        aggregation: str = "conservative",
+        aggregation: str = "mean",
+        eval_set: tuple = None,
+        overfit_correction: bool = True,
+        refit: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        EXPERIMENTAL. Get prediction intervals using residual quantiles from last active trees.
-        If boosting has converged to E(Y|X) and the quantiles estimated by KernelEstimator are
-        precise enough, this represents aleatoric uncertainty.
+        EXPERIMENTAL. Prediction intervals from dedicated quantile trees fit
+        on final-model residuals (Hall–Wolff–Yao (1999) style): predict(x) 
+        + Q_tau(residual | x) per tree, tau = alpha/2 and 1 - alpha/2. 
+        When fitting on training data, uses overfit_correction (LOO residuals) 
+        by default.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
             Features to predict on.
         alpha : float, default=0.1
             Significance level. Returns (1-alpha) prediction intervals.
-            E.g., alpha=0.1 gives 90% intervals.
-        proba : bool, default=True
-            For classifiers only. If True, transform logit intervals to probability
-            space. If False, return raw logit intervals.
+            Query-time argument: any alpha is evaluated against the fitted
+            trees' stored residual ECDFs, never triggers a refit.
         n_trees : int, default=None
-            Number of last active trees to use for interval estimation.
-            If None, uses min(5, number of active trees).
-            Using multiple trees provides more robust estimates.
-        aggregation : str, default='conservative'
-            How to combine intervals from multiple trees:
-            - 'conservative': min of lowers, max of uppers (widest intervals)
+            Number of last active trees whose feature subsets are used
+            (upper bound: constant-leaf rounds are skipped). If None, uses
+            min(5, number of active trees). Consulted at first fit.
+        aggregation : str, default='mean'
+            How to combine bounds from multiple trees:
             - 'mean': average of lowers and uppers
+            - 'median': median of lowers and uppers
+            Query-time argument, never triggers a refit.
+        eval_set : tuple of (X_val, y_val), optional
+            If provided, quantile trees are fit on residuals of this dataset
+            instead of training data. Consulted at first fit.
+        overfit_correction : bool, default=True
+            Subtract the LOO gap from training predictions before computing
+            residuals. Ignored with eval_set.
+        refit : bool, default=False
+            Quantile trees are fit on the first call and cached. Pass
+            refit=True to force refitting with the current arguments.
 
         Returns:
         lower : np.ndarray of shape (n_samples,)
             Lower bounds of prediction intervals.
         upper : np.ndarray of shape (n_samples,)
             Upper bounds of prediction intervals.
+
+        Notes:
+        - In-sample interval diagnostics are optimistic (quantile trees are
+          evaluated on their own training rows); validate coverage held-out.
+        - First-order mean-fit bias enters interval positions; widths are
+          immune within a tree. Use eval_set when calibration matters.
+        - The intervals estimate the oracle conditional-quantile interval:
+          the defensible claim is marginal coverage ~(1-alpha) on held-out
+          data. Widths adapt to x, but per-x conditional coverage is not
+          guaranteed in finite samples (the trade against split-conformal,
+          which gives the marginal guarantee at constant width).
         """
         if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
+        if self.objective.is_classifier:
+            raise NotImplementedError(
+                "predict_intervals is not implemented for classifiers."
+            )
+
         if not 0 < alpha < 1:
             raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+
+        if aggregation not in ("mean", "median"):
+            raise ValueError(
+                f"aggregation must be 'mean' or 'median', got {aggregation}"
+            )
 
         if self.last_active_tree_idx_ is None:
             raise RuntimeError("No active trees found (all rho values are zero)")
 
-        if aggregation not in ("conservative", "mean"):
-            raise ValueError(
-                f"aggregation must be 'conservative' or 'mean', got {aggregation}"
-            )
-
-        # default: use up to 5 trees
         if n_trees is None:
             n_trees = min(5, self.last_active_tree_idx_ + 1)
 
+        if refit or self.quantile_trees_ is None:
+            self._fit_quantile_trees(n_trees, eval_set, overfit_correction)
+
         predictions = self.predict(X).ravel()
         quantiles = (alpha / 2, 1 - alpha / 2)
-        tree_indices = self._last_n_active_tree_indices(n_trees)
 
         n_samples = X.shape[0]
-        lowers = np.zeros((len(tree_indices), n_samples))
-        uppers = np.zeros((len(tree_indices), n_samples))
+        lowers = np.zeros((len(self.quantile_trees_), n_samples))
+        uppers = np.zeros((len(self.quantile_trees_), n_samples))
 
-        for i, idx in enumerate(tree_indices):
-            tree = self.trees_[idx]
-            constructor = self.feature_constructors_[idx]
-            bounds = tree.predict_quantiles(constructor.transform(X), quantiles=quantiles)
+        for i, (q_tree, constructor) in enumerate(
+            zip(self.quantile_trees_, self.quantile_constructors_)
+        ):
+            bounds = q_tree.predict_quantiles(
+                constructor.transform(X), quantiles=quantiles
+            )
             lowers[i] = predictions + bounds[:, 0]
             uppers[i] = predictions + bounds[:, 1]
 
-        if aggregation == "mean":
-            lower = np.mean(lowers, axis=0)
-            upper = np.mean(uppers, axis=0)
-        else:
-            lower = np.min(lowers, axis=0)
-            upper = np.max(uppers, axis=0)
+        if len(self.quantile_trees_) == 1:
+            return lowers[0], uppers[0]
 
+        if aggregation == "median":
+            return np.median(lowers, axis=0), np.median(uppers, axis=0)
 
-        if self.objective.is_classifier and proba:
-            lower = self.objective.inverse_link(lower)
-            upper = self.objective.inverse_link(upper)
-
-        return lower, upper
+        return np.mean(lowers, axis=0), np.mean(uppers, axis=0)
 
     def predict_variance(
         self,
@@ -773,16 +800,7 @@ class KernelBooster:
         self, n_trees: int, eval_set: tuple = None, correct: bool = True
     ) -> None:
         """Fit KernelTrees on squared residuals for Fan & Yao variance estimation."""
-        if eval_set:
-            F = self.predict(eval_set[0]).ravel()
-            residuals = self.objective.residuals(eval_set[1].ravel(), F)
-        else:
-            F = self.predict(self.X_).ravel()
-            if correct:
-                F = F - self._training_loo_gap()  # F^{-i}: correct on the F scale
-            residuals = self.objective.residuals(self.y_.ravel(), F)
-
-        squared_residuals = residuals**2
+        squared_residuals = self._final_residuals(eval_set, correct) ** 2
 
         tree_indices = self._last_n_active_tree_indices(n_trees)
 
@@ -796,7 +814,7 @@ class KernelBooster:
                 use_gpu=self.use_gpu,
                 **self.kernel_optimization,
             )
-            X_fit = eval_set[0] if eval_set else self.X_
+            X_fit = eval_set[0] if eval_set else self.X_ # fit for all data or subsample?
             var_tree.fit(
                 constructor.transform(X_fit),
                 squared_residuals.reshape(-1, 1),
@@ -804,8 +822,52 @@ class KernelBooster:
             self.variance_trees_.append(var_tree)
             self.variance_constructors_.append(constructor)
 
+    def _fit_quantile_trees(
+        self, n_trees: int, eval_set: tuple = None, correct: bool = True
+    ) -> None:
+        """Fit KernelTrees on final-model residuals for interval estimation.
+        Trees with constant leaves are dropped."""
+        residuals = self._final_residuals(eval_set, correct)
+        tree_indices = self._last_n_active_tree_indices(n_trees)
+
+        quantile_trees, quantile_constructors = [], []
+
+        for idx in tree_indices:
+            if not all(self.trees_[idx].compiled_.is_kernel):
+                continue
+            constructor = self.feature_constructors_[idx]            
+            q_tree = KernelTree(
+                **self.tree_optimization,
+                use_gpu=self.use_gpu,
+                **self.kernel_optimization,
+            )
+            X_fit = eval_set[0] if eval_set else self.X_  # fit for all data or subsample?
+            q_tree.fit(constructor.transform(X_fit), residuals.reshape(-1, 1))
+            quantile_trees.append(q_tree)
+            quantile_constructors.append(constructor)
+
+        if not quantile_trees:
+            raise ValueError(
+                "Last n trees had constant leaves, no quantile estimation possible."
+            )
+
+        self.quantile_trees_ = quantile_trees
+        self.quantile_constructors_ = quantile_constructors
+
+    def _final_residuals(self, eval_set: tuple = None, correct: bool = True) -> np.ndarray:
+        """Response-scale (not F) residuals of the final model. When correct is
+        true these are LOO residuals to counter residual suppression for training
+        data (own-observation effect removed)."""
+        if eval_set:
+            F = self.predict(eval_set[0]).ravel()
+            return self.objective.residuals(eval_set[1].ravel(), F)
+        F = self.predict(self.X_).ravel()
+        if correct:
+            F = F - self._training_loo_gap()  # F^{-i}: correct on the F scale
+        return self.objective.residuals(self.y_.ravel(), F)
+
     def _training_loo_gap(self) -> np.ndarray:
-        """Computes the additive LOO gap for training data for F prediction: 
+        """Compute the additive LOO gap for training data for F prediction: 
         F^{-i} = F - gap, by removing each observations own contribution to 
         its prediction. Used to reconstruct LOO residuals to counter
         training residual suppression (removes the own-observation effect). 

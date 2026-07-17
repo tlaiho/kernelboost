@@ -218,7 +218,22 @@ class KernelEstimator:
             result[i] = self._kernel_quantiles(y_flat, weights[i], quantiles)
 
         return result
-    
+
+    def self_weights(self) -> np.ndarray:
+        """Normalized own-observation weights S_ii of the training rows."""
+        if not hasattr(self, 'precision_'):
+            raise RuntimeError("Estimator not fitted. Call fit() first.")
+
+        ws = self._backend.similarity(self.X_, self.X_, self.precision_)
+        s = 1.0 / np.maximum(ws, 1.0)  
+        return np.minimum(s, 1.0 - 1e-4) # guards against 1.0 weight
+
+    def loo_residuals(self) -> np.ndarray:
+        """Exact LOO training residuals: (y - m_hat)/(1 - S_ii) = y - m_hat^{-i}."""
+        s = self.self_weights()  # fitted-check happens here
+        resid = self.y_.ravel() - self.training_predictions_.ravel()
+        return resid / (1.0 - s)
+
     def _kernel_quantiles(
         self,
         values: np.ndarray,

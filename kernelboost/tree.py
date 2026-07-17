@@ -52,6 +52,7 @@ class CompiledTree:
                 out[mask] = est
         return out
 
+    # should this go?
     def predict_quantiles(
         self,
         X: np.ndarray,
@@ -104,12 +105,11 @@ class CompiledTree:
 
             if is_kern:
                 ws = est._backend.similarity(X_num[mask], est.X_, est.precision_)
-                s[mask] = 1.0 / np.maximum(ws, 1.0)  # ws >= 1 up to float32 rounding
+                s[mask] = 1.0 / np.maximum(ws, 1.0)
             else:
                 s[mask] = 1.0 / mask.sum()
 
-        return np.minimum(s, 1.0 - 1e-4)  # isolated-point guard, cf. C loo_mse
-    
+        return np.minimum(s, 1.0 - 1e-4) # guards against 1.0 weight    
 
 
 class KernelTree:

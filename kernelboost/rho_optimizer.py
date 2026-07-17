@@ -369,10 +369,12 @@ class RhoOptimizer:
 
         self.booster_.rho_ = list(self.rho_)
 
-        # rho changes invalidate the cached LOO gap and variance trees
+        # rho changes invalidate the cached LOO gap and second-stage trees
         self.booster_.loo_gap_ = None
         self.booster_.variance_trees_ = None
         self.booster_.variance_constructors_ = None
+        self.booster_.quantile_trees_ = None
+        self.booster_.quantile_constructors_ = None
 
         if self.lambda1_ is not None:
             self.booster_.lambda1 = self.lambda1_
