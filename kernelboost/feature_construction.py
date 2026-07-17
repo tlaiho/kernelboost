@@ -25,6 +25,7 @@ class FeatureConstructor(ABC):
     @abstractmethod
     def transform(self, X: np.ndarray) -> np.ndarray:
         """Return this round's feature columns from raw input X.
+        Row-wise pure function.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features_in)

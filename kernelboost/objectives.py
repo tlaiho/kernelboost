@@ -109,6 +109,23 @@ class Objective(ABC):
         """Score predictions. Override for objective-specific metrics."""
         return -self.loss(y, predictions)
 
+    def f_init(self, y: np.ndarray) -> np.floating:
+        """Return an initial prediction (mean) on the F scale."""
+        return np.mean(y)
+
+    def inverse_link(self, predictions: np.ndarray) -> np.ndarray:
+        """Map F-scale predictions to the response scale (identity link)."""
+        return predictions
+
+    def residuals(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
+        """Response-scale residuals from F-scale predictions."""
+        return y - self.inverse_link(predictions)
+
+    def loo_init_gap(self, y: np.ndarray, y_mean: float) -> np.ndarray:
+        """Compute leave-one-out gap of f_init on the F scale:
+        f_init(y) - f_init(y without observation i), for each i."""
+        return (y - y_mean) / (len(y) - 1)
+
 
 class MSEObjective(Objective):
     """Mean Squared Error objective for regression."""
@@ -177,7 +194,7 @@ class EntropyObjective(Objective):
 
     def loss(self, y: np.ndarray, predictions: np.ndarray) -> float:
         y = y.ravel()
-        p_predictions = self.logits_to_probability(predictions).ravel()
+        p_predictions = self.inverse_link(predictions).ravel()
         mask_y1 = y == 1
         weight_0, weight_1 = self.class_weights[0], self.class_weights[1]
         log_sum = np.sum(-weight_1 * np.log(p_predictions[mask_y1])) + np.sum(
@@ -186,7 +203,7 @@ class EntropyObjective(Objective):
         return log_sum / len(y)
 
     def gradient(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
-        p_predictions = self.logits_to_probability(predictions)
+        p_predictions = self.inverse_link(predictions)
         pseudoresiduals = np.zeros_like(p_predictions)
         weight_0, weight_1 = self.class_weights[0], self.class_weights[1]
         mask_y1 = y == 1
@@ -195,7 +212,7 @@ class EntropyObjective(Objective):
         return pseudoresiduals
     
     def hessian(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
-        p = self.logits_to_probability(predictions)
+        p = self.inverse_link(predictions)
         base_hessian = (p * (1 - p)).ravel()
         weights = np.where(y.ravel() == 1, self.class_weights[1], self.class_weights[0])
         return weights * base_hessian
@@ -247,14 +264,22 @@ class EntropyObjective(Objective):
         """Return accuracy score. predictions are log-odds."""
         return accuracy_score(y, (predictions > 0.0).astype(int))
 
-    def predict_proba(self, log_odds: np.ndarray) -> np.ndarray:
-        return self.logits_to_probability(log_odds) 
-    
-    def logits_to_probability(self, log_odds: np.ndarray) -> np.ndarray:
+    def f_init(self, y: np.ndarray) -> np.floating:
+        """Return clipped log-odds of the mean."""
+        y_mean_clipped = np.clip(np.mean(y), 1e-10, 1 - 1e-10)
+        return np.log(y_mean_clipped / (1 - y_mean_clipped))
+
+    def inverse_link(self, predictions: np.ndarray) -> np.ndarray:
         """Convert log-odds to probabilities with clipping."""
-        log_odds = np.clip(log_odds, -100, 36)
+        log_odds = np.clip(predictions, -100, 36)
         likelihoods = np.exp(log_odds)
         return likelihoods / (1 + likelihoods)
+
+    def loo_init_gap(self, y: np.ndarray, y_mean: float) -> np.ndarray:
+        n = len(y)
+        y_bar = np.clip(y_mean, 1e-10, 1 - 1e-10)
+        y_loo = np.clip((n * y_mean - y) / (n - 1), 1e-10, 1 - 1e-10)
+        return np.log(y_bar / (1 - y_bar)) - np.log(y_loo / (1 - y_loo))
 
 
 class QuantileObjective(Objective):

@@ -29,9 +29,7 @@ class RhoOptimizer:
 
     def _base_prediction(self) -> float:
         """Return the base prediction (logit for classifiers, mean for regression)."""
-        if self.booster_.objective.is_classifier:
-            return self.booster_.logit_mean_.item()
-        return self.booster_.y_mean_.item()
+        return self.booster_.f_init_.item()
 
     def _build_design_matrix(self, X: np.ndarray) -> np.ndarray:
         """Build design matrix Z where column i contains tree i's predictions."""
@@ -371,6 +369,10 @@ class RhoOptimizer:
 
         self.booster_.rho_ = list(self.rho_)
 
+        # rho changes invalidate the cached LOO gap and variance trees
+        self.booster_.loo_gap_ = None
+        self.booster_.variance_trees_ = None
+        self.booster_.variance_constructors_ = None
 
         if self.lambda1_ is not None:
             self.booster_.lambda1 = self.lambda1_

@@ -82,6 +82,33 @@ class CompiledTree:
                 result[mask] = est
 
         return result
+
+    def self_weights(self, X: np.ndarray, X_num: np.ndarray | None = None) -> np.ndarray:
+        """Returns self-weights for all X. Mean leaves return 1/n_leaf as the weight.
+        X must be exactly this tree's full training subsample (any row order)."""
+        n = X.shape[0]
+        s = np.zeros(n, dtype=np.float32)
+        if X_num is None:
+            X_num = np.delete(X, self.categorical, axis=1) if self.categorical else X
+
+        for conds, est, is_kern in zip(self.conditions, self.estimators, self.is_kernel):
+            mask = np.ones(n, dtype=bool)
+            for feat, thresh, direction in conds:
+                if direction == 0:
+                    mask &= X[:, feat] <= thresh
+                else:
+                    mask &= X[:, feat] > thresh
+
+            if not np.any(mask):
+                continue
+
+            if is_kern:
+                ws = est._backend.similarity(X_num[mask], est.X_, est.precision_)
+                s[mask] = 1.0 / np.maximum(ws, 1.0)  # ws >= 1 up to float32 rounding
+            else:
+                s[mask] = 1.0 / mask.sum()
+
+        return np.minimum(s, 1.0 - 1e-4)  # isolated-point guard, cf. C loo_mse
     
 
 
@@ -519,6 +546,11 @@ class KernelTree:
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using the compiled tree."""
         return self.compiled_.predict(np.asarray(X, dtype=np.float32))
+
+    def self_weights(self, X: np.ndarray) -> np.ndarray:
+        """Returns self-weights for all X. Mean leaves return 1/n_leaf
+        as the weight. X must be this tree's full training subsample."""
+        return self.compiled_.self_weights(np.asarray(X, dtype=np.float32))
 
     def predict_quantiles(
         self, X: np.ndarray, quantiles: tuple = (0.1, 0.5, 0.9)

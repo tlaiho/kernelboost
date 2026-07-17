@@ -328,6 +328,9 @@ class KernelBooster:
         else:
             self.best_round_ = None
 
+        # Stored because RhoOptimizer may overwrite rho_
+        self.fit_rho_ = tuple(self.rho_)
+
         if self.verbose > 0:
             print("Finished training.")
 
@@ -360,18 +363,18 @@ class KernelBooster:
                 print(f"Feature selector initialized: {self.n_estimators_} rounds")
 
         self.y_mean_ = np.mean(self.y_)
-        if self.objective.is_classifier:
-            y_mean_clipped = np.clip(self.y_mean_, 1e-10, 1 - 1e-10)
-            self.logit_mean_ = np.log(y_mean_clipped / (1 - y_mean_clipped))
-            self.predictions_ = np.full((self.n_samples_, 1), self.logit_mean_)
-        else:
-            self.predictions_ = np.full((self.n_samples_, 1), self.y_mean_)
+        self.f_init_ = self.objective.f_init(self.y_)
+        self.predictions_ = np.full((self.n_samples_, 1), self.f_init_)
 
         self.objective_ = [self.objective(self.y_, self.predictions_)]
 
         self.trees_, self.tree_predictions_ = [], []
         self.rho_, self.feature_constructors_ = [], []
         self.gain_ = []
+        self.subsample_indices_ = []
+        self.variance_trees_ = None
+        self.variance_constructors_ = None
+        self.loo_gap_ = None
         self.last_precision_ = self.kernel_optimization["initial_precision"]
         self.rseed_ = np.random.randint(100000, 1234567890, size=1)[0]
         self._rng = np.random.default_rng(self.rseed_)
@@ -382,14 +385,9 @@ class KernelBooster:
             self._best_round = 0
             self._rounds_no_improvement = 0
             self.val_losses_ = []
-            if self.objective.is_classifier:
-                self.eval_predictions = np.full(
-                    (self._eval_X.shape[0], 1), self.logit_mean_
-                )
-            else:
-                self.eval_predictions = np.full(
-                    (self._eval_X.shape[0], 1), self.y_mean_
-                )
+            self.eval_predictions = np.full(
+                (self._eval_X.shape[0], 1), self.f_init_
+            )
         else:
             self.val_losses_ = None
             self.eval_predictions = None
@@ -411,13 +409,15 @@ class KernelBooster:
 
         training_features = constructor.transform(self.X_)
         all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
-        training_data = self._rng.choice(
-            all_data,
+        idx = self._rng.choice(
+            self.n_samples_,
             size=self._sample_size,
             p=self.sampling_weights_,
             replace=False,
             shuffle=False,
         )
+        self.subsample_indices_.append(idx)
+        training_data = all_data[idx]
 
         self.kernel_optimization.update({"initial_precision": self.last_precision_})
         self.trees_.append(
@@ -572,10 +572,7 @@ class KernelBooster:
                     self.rho_[i] * self.trees_[i].predict(prediction_features).ravel()
                 )
 
-        if self.objective.is_classifier:
-            predictions += self.logit_mean_.item()
-        else:
-            predictions += self.y_mean_.item()
+        predictions += self.f_init_.item()
 
         if self.verbose > 0:
             nan_count = np.isnan(predictions).sum()
@@ -604,7 +601,7 @@ class KernelBooster:
             )
 
         raw_predictions = self.predict(X)
-        return self.objective.logits_to_probability(raw_predictions)
+        return self.objective.inverse_link(raw_predictions)
 
     def fit_predict(
         self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray = None
@@ -691,8 +688,8 @@ class KernelBooster:
 
 
         if self.objective.is_classifier and proba:
-            lower = self.objective.logits_to_probability(lower)
-            upper = self.objective.logits_to_probability(upper)
+            lower = self.objective.inverse_link(lower)
+            upper = self.objective.inverse_link(upper)
 
         return lower, upper
 
@@ -700,12 +697,20 @@ class KernelBooster:
         self,
         X: np.ndarray,
         n_trees: int = None,
-        aggregation: str = "max",
+        aggregation: str = "median",
         eval_set: tuple = None,
+        overfit_correction: bool = True,
+        refit: bool = False,
     ) -> np.ndarray:
         """
         Predict conditional variance using Fan & Yao (1998) double kernel estimation.
         Fits dedicated KernelTrees on squared residuals from the booster.
+
+        When fitting on training data, raw residuals are suppressed by each
+        observation's own contribution to its prediction; by default this is
+        corrected by subtracting the LOO gap (_training_loo_gap) before
+        squaring. The correction removes own-observation variance leakage only,
+        and estimation bias both at the mean and variance stages are still present. 
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
@@ -713,13 +718,19 @@ class KernelBooster:
         n_trees : int, default=None
             Number of last active trees whose feature subsets are used.
             If None, uses min(5, number of active trees).
-        aggregation : str, default='max'
+        aggregation : str, default='median'
             How to combine variances from multiple trees:
-            - 'max': maximum variance (most conservative)
+            - 'median': median variance (more accurate and robust in benchmarks)
             - 'mean': average variance
         eval_set : tuple of (X_val, y_val), optional.
             If provided variance estimation will be done on this dataset
             instead of training data.
+        overfit_correction : bool, default=True
+            Subtract the LOO gap from training predictions before computing
+            residuals. Ignored with eval_set.
+        refit : bool, default=False
+            Variance trees are fit on the first call and cached. Pass 
+            refit=True to force refitting with the current arguments.
 
         Returns:
         variance : np.ndarray of shape (n_samples,)
@@ -728,8 +739,10 @@ class KernelBooster:
         if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
-        if aggregation not in ("max", "mean"):
-            raise ValueError(f"aggregation must be 'max' or 'mean', got {aggregation}")
+        if aggregation not in ("mean", "median"):
+            raise ValueError(
+                f"aggregation must be 'mean' or 'median', got {aggregation}"
+            )
 
         if self.last_active_tree_idx_ is None:
             raise RuntimeError("No active trees found (all rho values are zero)")
@@ -737,32 +750,37 @@ class KernelBooster:
         if n_trees is None:
             n_trees = min(5, self.last_active_tree_idx_ + 1)
 
-        # fit variance trees on first call
-        if not hasattr(self, "variance_trees_") or self.variance_trees_ is None:
-            self._fit_variance_trees(n_trees, eval_set)
+        if refit or self.variance_trees_ is None:
+            self._fit_variance_trees(n_trees, eval_set, overfit_correction)
 
         n_samples = X.shape[0]
         variances = np.zeros((len(self.variance_trees_), n_samples))
 
         for i, (vtree, constructor) in enumerate(
             zip(self.variance_trees_, self.variance_constructors_)
-        ):
+            ):
             variances[i] = vtree.predict(constructor.transform(X)).ravel()
 
         if len(self.variance_trees_) == 1:
             return np.maximum(variances[0], 0.0)
 
-        if aggregation == "max":
-            return np.maximum(np.max(variances, axis=0), 0.0)
-        else:
-            return np.maximum(np.mean(variances, axis=0), 0.0)
+        if aggregation == "median":
+            return np.maximum(np.median(variances, axis=0), 0.0)
+        
+        return np.maximum(np.mean(variances, axis=0), 0.0)
 
-    def _fit_variance_trees(self, n_trees: int, eval_set: tuple = None) -> None:
+    def _fit_variance_trees(
+        self, n_trees: int, eval_set: tuple = None, correct: bool = True
+    ) -> None:
         """Fit KernelTrees on squared residuals for Fan & Yao variance estimation."""
         if eval_set:
-            residuals = eval_set[1].ravel() - self.predict(eval_set[0]).ravel()
+            F = self.predict(eval_set[0]).ravel()
+            residuals = self.objective.residuals(eval_set[1].ravel(), F)
         else:
-            residuals = self.y_.ravel() - self.predict(self.X_).ravel()
+            F = self.predict(self.X_).ravel()
+            if correct:
+                F = F - self._training_loo_gap()  # F^{-i}: correct on the F scale
+            residuals = self.objective.residuals(self.y_.ravel(), F)
 
         squared_residuals = residuals**2
 
@@ -785,6 +803,33 @@ class KernelBooster:
             )
             self.variance_trees_.append(var_tree)
             self.variance_constructors_.append(constructor)
+
+    def _training_loo_gap(self) -> np.ndarray:
+        """Computes the additive LOO gap for training data for F prediction: 
+        F^{-i} = F - gap, by removing each observations own contribution to 
+        its prediction. Used to reconstruct LOO residuals to counter
+        training residual suppression (removes the own-observation effect). 
+        """
+        if self.loo_gap_ is not None:
+            return self.loo_gap_
+
+        gap = self.objective.loo_init_gap(self.y_.ravel(), self.y_mean_)
+        preds = np.full((self.n_samples_, 1), self.f_init_, dtype=np.float32)
+        n_rounds = self.best_round_ if self.best_round_ is not None else len(self.trees_)
+
+        for t in range(n_rounds):
+            if self.rho_[t] != 0:
+                r_t = self.objective.gradient(self.y_, preds).ravel()
+                idx = self.subsample_indices_[t]
+                Xt = self.feature_constructors_[t].transform(self.X_[idx])
+                s = self.trees_[t].self_weights(Xt)
+                m_hat = self.tree_predictions_[t][idx].ravel()
+                gap[idx] += self.rho_[t] * (r_t[idx] - m_hat) * s / (1.0 - s)
+            if self.fit_rho_[t] != 0:
+                preds += self.fit_rho_[t] * self.tree_predictions_[t]
+
+        self.loo_gap_ = gap
+        return self.loo_gap_
 
     def _last_n_active_tree_indices(self, n: int) -> list[int]:
         """Find indices of last n trees with non-zero rho."""
