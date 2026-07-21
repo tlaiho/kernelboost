@@ -611,38 +611,35 @@ class KernelBooster:
         """Fit and return predictions on X."""
         return self.fit(X, y, sample_weight).predict(X)
 
-    def predict_intervals(
+    def predict_quantiles(
         self,
         X: np.ndarray,
-        alpha: float = 0.1,
+        taus,
         n_trees: int = None,
         aggregation: str = "mean",
         eval_set: tuple = None,
         overfit_correction: bool = True,
         refit: bool = False,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> np.ndarray:
         """
-        EXPERIMENTAL. Prediction intervals from dedicated quantile trees fit
-        on final-model residuals (Hall–Wolff–Yao (1999) style): predict(x) 
-        + Q_tau(residual | x) per tree, tau = alpha/2 and 1 - alpha/2. 
-        When fitting on training data, uses overfit_correction (LOO residuals) 
-        by default.
+        EXPERIMENTAL. Predict conditional quantiles. Uses dedicated quantile 
+        trees fit on final-model residuals (Hall–Wolff–Yao (1999) style): 
+        predict(x) + Q_tau(residual | x) per tree, aggregated across trees. 
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
             Features to predict on.
-        alpha : float, default=0.1
-            Significance level. Returns (1-alpha) prediction intervals.
-            Query-time argument: any alpha is evaluated against the fitted
+        taus : float or sequence of floats in (0, 1)
+            Quantile level(s). A scalar is treated as a length-1 vector; all
+            levels are evaluated in a single pass over the quantile trees.
+            Query-time argument: any taus are evaluated against the fitted
             trees' stored residual ECDFs, never triggers a refit.
         n_trees : int, default=None
             Number of last active trees whose feature subsets are used
             (upper bound: constant-leaf rounds are skipped). If None, uses
             min(5, number of active trees). Consulted at first fit.
         aggregation : str, default='mean'
-            How to combine bounds from multiple trees:
-            - 'mean': average of lowers and uppers
-            - 'median': median of lowers and uppers
+            How to combine quantile estimates across trees: 'mean' or 'median'.
             Query-time argument, never triggers a refit.
         eval_set : tuple of (X_val, y_val), optional
             If provided, quantile trees are fit on residuals of this dataset
@@ -655,32 +652,17 @@ class KernelBooster:
             refit=True to force refitting with the current arguments.
 
         Returns:
-        lower : np.ndarray of shape (n_samples,)
-            Lower bounds of prediction intervals.
-        upper : np.ndarray of shape (n_samples,)
-            Upper bounds of prediction intervals.
-
-        Notes:
-        - In-sample interval diagnostics are optimistic (quantile trees are
-          evaluated on their own training rows); validate coverage held-out.
-        - First-order mean-fit bias enters interval positions; widths are
-          immune within a tree. Use eval_set when calibration matters.
-        - The intervals estimate the oracle conditional-quantile interval:
-          the defensible claim is marginal coverage ~(1-alpha) on held-out
-          data. Widths adapt to x, but per-x conditional coverage is not
-          guaranteed in finite samples (the trade against split-conformal,
-          which gives the marginal guarantee at constant width).
+        q : np.ndarray of shape (len(taus), n_samples)
+            Estimated conditional quantile of the response at each level (one
+            row per tau). For a scalar tau the shape is (1, n_samples).
         """
         if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
         if self.objective.is_classifier:
             raise NotImplementedError(
-                "predict_intervals is not implemented for classifiers."
+                "quantile/interval prediction is not implemented for classifiers."
             )
-
-        if not 0 < alpha < 1:
-            raise ValueError(f"alpha must be in (0, 1), got {alpha}")
 
         if aggregation not in ("mean", "median"):
             raise ValueError(
@@ -690,6 +672,10 @@ class KernelBooster:
         if self.last_active_tree_idx_ is None:
             raise RuntimeError("No active trees found (all rho values are zero)")
 
+        taus = np.atleast_1d(np.asarray(taus, dtype=float))
+        if np.any((taus <= 0) | (taus >= 1)):
+            raise ValueError(f"taus must be in (0, 1), got {taus}")
+
         if n_trees is None:
             n_trees = min(5, self.last_active_tree_idx_ + 1)
 
@@ -697,28 +683,51 @@ class KernelBooster:
             self._fit_quantile_trees(n_trees, eval_set, overfit_correction)
 
         predictions = self.predict(X).ravel()
-        quantiles = (alpha / 2, 1 - alpha / 2)
-
         n_samples = X.shape[0]
-        lowers = np.zeros((len(self.quantile_trees_), n_samples))
-        uppers = np.zeros((len(self.quantile_trees_), n_samples))
 
+        # dimensions: (n_quantile_trees, n_taus, n_samples)
+        stacked = np.zeros((len(self.quantile_trees_), taus.shape[0], n_samples))
         for i, (q_tree, constructor) in enumerate(
             zip(self.quantile_trees_, self.quantile_constructors_)
         ):
             bounds = q_tree.predict_quantiles(
-                constructor.transform(X), quantiles=quantiles
+                constructor.transform(X), quantiles=tuple(taus)
             )
-            lowers[i] = predictions + bounds[:, 0]
-            uppers[i] = predictions + bounds[:, 1]
+            stacked[i] = predictions[None, :] + bounds.T
 
         if len(self.quantile_trees_) == 1:
-            return lowers[0], uppers[0]
+            return stacked[0]
 
         if aggregation == "median":
-            return np.median(lowers, axis=0), np.median(uppers, axis=0)
+            return np.median(stacked, axis=0)
 
-        return np.mean(lowers, axis=0), np.mean(uppers, axis=0)
+        return np.mean(stacked, axis=0)
+
+    def predict_intervals(
+        self,
+        X: np.ndarray,
+        alpha: float = 0.1,
+        n_trees: int = None,
+        aggregation: str = "mean",
+        eval_set: tuple = None,
+        overfit_correction: bool = True,
+        refit: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Convenience wrapper over predict_quantiels for a prediction interval. 
+        Returns (lower, upper)."""
+        if not 0 < alpha < 1:
+            raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+
+        quantiles = self.predict_quantiles(
+            X, 
+            (alpha / 2, 1 - alpha / 2),
+            n_trees=n_trees, 
+            aggregation=aggregation, 
+            eval_set=eval_set,
+            overfit_correction=overfit_correction, 
+            refit=refit,
+        )
+        return quantiles[0], quantiles[1]
 
     def predict_variance(
         self,
@@ -731,13 +740,12 @@ class KernelBooster:
     ) -> np.ndarray:
         """
         Predict conditional variance using Fan & Yao (1998) double kernel estimation.
-        Fits dedicated KernelTrees on squared residuals from the booster.
-
-        When fitting on training data, raw residuals are suppressed by each
-        observation's own contribution to its prediction; by default this is
-        corrected by subtracting the LOO gap (_training_loo_gap) before
-        squaring. The correction removes own-observation variance leakage only,
-        and estimation bias both at the mean and variance stages are still present. 
+        Fits dedicated KernelTrees on squared residuals from the booster. When fitting 
+        on training data, raw residuals are suppressed by each observation's own 
+        contribution to its prediction; by default this is corrected by subtracting 
+        the LOO gap (_training_loo_gap) before squaring. The correction removes 
+        own-observation variance leakage only, and thus estimation bias both at the mean 
+        and variance stages are still present. 
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
