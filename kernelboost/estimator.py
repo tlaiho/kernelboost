@@ -226,7 +226,7 @@ class KernelEstimator:
 
         ws = self._backend.similarity(self.X_, self.X_, self.precision_)
         s = 1.0 / np.maximum(ws, 1.0)  
-        return np.minimum(s, 1.0 - 1e-4) # guards against 1.0 weight
+        return np.minimum(s, 1.0 - 1e-2) # guards against 1.0 weight
 
     def loo_residuals(self) -> np.ndarray:
         """Exact LOO training residuals: (y - m_hat)/(1 - S_ii) = y - m_hat^{-i}."""

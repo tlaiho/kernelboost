@@ -109,7 +109,7 @@ class CompiledTree:
             else:
                 s[mask] = 1.0 / mask.sum()
 
-        return np.minimum(s, 1.0 - 1e-4) # guards against 1.0 weight    
+        return np.minimum(s, 1.0 - 1e-2) # guards against 1.0 weight    
 
 
 class KernelTree:
