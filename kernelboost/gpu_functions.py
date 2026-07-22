@@ -102,12 +102,12 @@ def cuda_loo(t_dependent: np.ndarray,
     # detect bad rows: zero weight or isolated
     diag_indices = cp.arange(t_count)
     diag_weights = k_matrix[diag_indices, diag_indices]
-    bad_weight_mask = diag_weights > 1.0 - 1e-4
+    bad_weight_mask = diag_weights > 1.0 - 1e-2  # guard against 1.0 self-weight
 
     predictions = cp.dot(k_matrix, c_td)
 
     # clamp self weights to prevent division by near-zero
-    k_matrix[diag_indices, diag_indices] = cp.minimum(diag_weights, 1.0 - 1e-4)
+    k_matrix[diag_indices, diag_indices] = cp.minimum(diag_weights, 1.0 - 1e-2)
     l_errors = cp.zeros(t_count, dtype=cp.float32)
     loo_grid = ((int(t_count) + 1023) // 1024, 1)  # 1d grid
     loo_error(loo_grid, (1024, 1), (predictions, c_td, k_matrix, l_errors, t_count))

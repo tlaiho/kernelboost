@@ -1001,13 +1001,13 @@ class KernelBooster:
 
     @property
     def feature_importances_(self) -> np.ndarray:
-        """Feature importance based on aggregated |rho| values."""
+        """Feature importance based on aggregated loss reduction."""
         if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
         importances = np.zeros(self.n_features_in_)
-        for constructor, rho in zip(self.feature_constructors_, self.rho_):
+        for constructor, gain in zip(self.feature_constructors_, self.gain_):
             for idx in constructor.source_features:
-                importances[idx] += abs(rho)
+                importances[idx] += gain
         total = importances.sum()
         if total > 0:
             importances /= total
