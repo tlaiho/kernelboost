@@ -303,7 +303,6 @@ class KernelTree:
             return None
 
         qs = [0.15, 0.25, 0.35, 0.5, 0.65, 0.75, 0.85]
-        min_ratio = 2 * self.min_sample / n  # makes room for categorical splits
 
         best, best_feat, best_val = -np.inf, None, None
         for f in self.numerical_:
@@ -312,7 +311,8 @@ class KernelTree:
             if rng == 0:
                 continue
             for i in range(1, len(qs) - 1):
-                if qs[i] < min_ratio or qs[i] > (1 - min_ratio):
+                left_n = int((X[:, f] <= cuts[i]).sum())
+                if left_n < self.min_sample or (n - left_n) < self.min_sample:
                     continue
                 score = abs((cuts[i] - cuts[i-1]) / (rng * (qs[i] - qs[i-1])) - 1)
                 if score > best:
