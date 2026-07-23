@@ -262,9 +262,9 @@ class RhoOptimizer:
         n = len(y)
 
         Z = self._build_design_matrix(X)
-        # indices to select data
+        
         indices = np.arange(n)
-        np.random.shuffle(indices)
+        np.random.default_rng(self.booster_.rseed_).shuffle(indices)
         fold_size = n // k
 
         objective = self.booster_.objective

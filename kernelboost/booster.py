@@ -58,6 +58,9 @@ class KernelBooster:
         Rounds without improvement before stopping.
     stopping_threshold : float, default=0.0
         Early stopping threshold for mean |rho| if no validation set provided.
+    random_state : int, default=None
+        Seeds all randomness of the fit: subsampling, bandwidth search, and
+        the default selector.
     verbose : int, default=0
         Verbosity level.
     use_gpu : bool, default=False
@@ -89,6 +92,7 @@ class KernelBooster:
         sample_share: float = 1.0,
         n_iter_no_change: int = 20,
         stopping_threshold: float = 0.0,
+        random_state: int = None,
         verbose: int = 0,
         use_gpu: bool = False,
     ):
@@ -116,6 +120,7 @@ class KernelBooster:
         self.sample_share = sample_share
         self.n_iter_no_change = n_iter_no_change
         self.stopping_threshold = stopping_threshold
+        self.random_state = random_state
 
         self.verbose = verbose
         self.use_gpu = use_gpu
@@ -188,6 +193,13 @@ class KernelBooster:
         ):
             raise ValueError(
                 f"feature_tree_tuple: must be a tuple of (indices, tree_type) tuples"
+            )
+        if self.random_state is not None and (
+            not isinstance(self.random_state, (int, np.integer))
+            or self.random_state < 0
+        ):
+            raise ValueError(
+                f"random_state must be a non-negative integer or None, got {self.random_state}"
             )
 
     def _validate_data(self, X: np.ndarray, y: np.ndarray) -> None:
@@ -328,7 +340,7 @@ class KernelBooster:
         else:
             self.best_round_ = None
 
-        # Stored because RhoOptimizer may overwrite rho_
+        # stored because RhoOptimizer may overwrite rho_
         self.fit_rho_ = tuple(self.rho_)
 
         if self.verbose > 0:
@@ -337,6 +349,13 @@ class KernelBooster:
     def _init_training_state(self) -> None:
         """Initialize training state."""
         self._sample_size = int(self.subsample_share * self.n_samples_)
+
+        if self.random_state is not None:
+            s_kernel, s_selector = np.random.SeedSequence(self.random_state).spawn(2)
+            selector_seed = int(s_selector.generate_state(1)[0])
+        else:
+            s_kernel = None
+            selector_seed = None
 
         # priority: explicit feature_tree_tuple > feature_selector > default random
         if self.feature_tree_tuple is not None:
@@ -348,7 +367,7 @@ class KernelBooster:
             if self.feature_selector is not None:
                 selector = self.feature_selector
             else:
-                selector = RandomSelector()
+                selector = RandomSelector(seed=selector_seed)
                 self.feature_selector = selector
 
             self.n_estimators_ = selector.initialize(
@@ -378,8 +397,16 @@ class KernelBooster:
         self.quantile_constructors_ = None
         self.loo_gap_ = None
         self.last_precision_ = self.kernel_optimization["initial_precision"]
-        self.rseed_ = np.random.randint(100000, 1234567890, size=1)[0]
+        if self.random_state is not None:
+            self.rseed_ = self.random_state
+        else:
+            self.rseed_ = np.random.randint(100000, 1234567890, size=1)[0]
+
         self._rng = np.random.default_rng(self.rseed_)
+        if s_kernel is None:
+            s_kernel = np.random.SeedSequence(int(self.rseed_)).spawn(2)[0]
+        self._kernel_rng = np.random.default_rng(s_kernel)
+        self.kernel_optimization["seed"] = self._kernel_rng
 
         # initialize validation tracking if eval_set provided
         if self._eval_X is not None:
@@ -948,6 +975,7 @@ class KernelBooster:
             "max_features": self.max_features,
             "n_iter_no_change": self.n_iter_no_change,
             "overlap_epsilon": self.overlap_epsilon,
+            "random_state": self.random_state,
         }
 
     def set_params(self, **params) -> "KernelBooster":

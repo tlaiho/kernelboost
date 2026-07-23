@@ -66,6 +66,8 @@ class MulticlassBooster:
         consecutive rounds. Only used when eval_set is provided to fit().
     stopping_threshold : float, default=0.0
         Early stopping threshold for mean |rho|.
+    random_state : int, default=None
+        Seeds the fit.
     verbose : int, default=1
         Verbosity level. 0 = silent, 1 = progress.
     use_gpu : bool, default=True
@@ -97,6 +99,7 @@ class MulticlassBooster:
         sample_share: float = 1.0,
         n_iter_no_change: int = 20,
         stopping_threshold: float = 0.0,
+        random_state: int = None,
         verbose: int = 1,
         use_gpu: bool = True,
     ):
@@ -115,6 +118,7 @@ class MulticlassBooster:
 
         self.n_iter_no_change = n_iter_no_change
         self.stopping_threshold = stopping_threshold
+        self.random_state = random_state
 
         self.verbose = verbose
         self.use_gpu = use_gpu
@@ -355,6 +359,14 @@ class MulticlassBooster:
         else:
             n_estimators_ = self.n_estimators
 
+        # distinct per-class seeds
+        if self.random_state is not None:
+            class_seeds = np.random.SeedSequence(self.random_state).generate_state(
+                self.n_classes_
+            )
+        else:
+            class_seeds = None
+
         self.boosters_ = []
 
         for i, cls in enumerate(self.classes_):
@@ -383,6 +395,7 @@ class MulticlassBooster:
                 **self.kernel_optimization,
                 n_iter_no_change=self.n_iter_no_change,
                 stopping_threshold=self.stopping_threshold,
+                random_state=int(class_seeds[i]) if class_seeds is not None else None,
                 verbose=self.verbose,
                 use_gpu=self.use_gpu,
             )
@@ -484,6 +497,7 @@ class MulticlassBooster:
             **self.kernel_optimization,
             'n_iter_no_change': self.n_iter_no_change,
             'stopping_threshold': self.stopping_threshold,
+            'random_state': self.random_state,
             'verbose': self.verbose,
             'use_gpu': self.use_gpu,
         }

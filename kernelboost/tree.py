@@ -52,7 +52,6 @@ class CompiledTree:
                 out[mask] = est
         return out
 
-    # should this go?
     def predict_quantiles(
         self,
         X: np.ndarray,
@@ -146,6 +145,8 @@ class KernelTree:
         Precision selection method: 'search' (LOO-CV) or 'silverman'.
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
+    seed : int, np.random.Generator, or None, default=None
+        Seed or shared generator forwarded to leaf kernel estimators. 
     tree_type : str, default='kernel'
         Leaf node type: 'kernel' for kernel estimation or 'constant' for constant leaves.
     gain_threshold : float, default=1e-3
@@ -170,6 +171,7 @@ class KernelTree:
         sample_share: float = 1.0,
         precision_method: str = 'pilot-cv',
         pilot_factor: float = 3.0,
+        seed=None,
         tree_type: str = 'kernel',
         gain_threshold: float = 1e-3,
         quantiles: list = None,
@@ -188,6 +190,7 @@ class KernelTree:
         self.sample_share = sample_share
         self.precision_method = precision_method
         self.pilot_factor = pilot_factor
+        self.seed = seed
         self.tree_type = tree_type
         self.gain_threshold = gain_threshold
 
@@ -204,6 +207,7 @@ class KernelTree:
             'sample_share': sample_share,
             'precision_method': precision_method,
             'pilot_factor': pilot_factor,
+            'seed': seed,
         }
 
         # min sample decreased, depth increase for non-kernel trees
@@ -585,6 +589,7 @@ class KernelTree:
             'sample_share': self.sample_share,
             'precision_method': self.precision_method,
             'pilot_factor': self.pilot_factor,
+            'seed': self.seed,
             'tree_type': self.tree_type,
             'gain_threshold': self.gain_threshold,
             'quantiles': self.quantiles,
@@ -606,6 +611,7 @@ class KernelTree:
             'sample_share': self.sample_share,
             'precision_method': self.precision_method,
             'pilot_factor': self.pilot_factor,
+            'seed': self.seed,
         }
 
         self._const_min_sample = max(50, self.min_sample // 5)

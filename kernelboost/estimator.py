@@ -26,8 +26,9 @@ class KernelEstimator:
         or 'silverman' (rule-of-thumb for testing).
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
-    seed : int, default=None
-        Random seed for reproducibility when subsampling during precision optimization.
+    seed : int, np.random.Generator, or None, default=None
+        Seed or shared generator for the precision search and the
+        precision-optimization subsample.
     """
 
     def __init__(
@@ -89,6 +90,7 @@ class KernelEstimator:
             raise ValueError("y contains NaN values. Kernel estimation requires complete data.")
 
         self._backend = Backend(self.use_gpu, self.kernel_type)
+        self._rng = np.random.default_rng(self.seed)
         self.precision_ = self._optimal_precision()
         self.training_predictions_ = self.predict(self.X_)
 
@@ -100,7 +102,7 @@ class KernelEstimator:
         if self.n_samples_ > 1500 and sample_share < 1.0:
             tdata = np.concatenate((self.y_, self.X_), axis=1)
             sample_size = int(max(sample_share * tdata.shape[0], 1000))
-            sample = np.random.default_rng(self.seed).choice(tdata, sample_size)
+            sample = self._rng.choice(tdata, sample_size)
             y = np.ascontiguousarray(sample[:, 0].reshape(-1, 1))
             X = np.delete(sample, 0, axis=1)
         else:
@@ -120,7 +122,8 @@ class KernelEstimator:
             X = cp.asarray(X, dtype=cp.float32)
 
         optimal_precision = optimize_precision(
-            self._backend.loo_cv, y, X, self.kernel_optimization, mean_y=mean_y,
+            self._backend.loo_cv, y, X, self.kernel_optimization,
+            rng=self._rng, mean_y=mean_y,
         )
         return optimal_precision
 
