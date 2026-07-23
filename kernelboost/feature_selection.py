@@ -66,6 +66,26 @@ _mi_lib.histogram_mi_3d_batch_gr.restype = None
 _mi_lib.histogram_mi_3d_batch_gr.argtypes = _mi_lib.histogram_mi_3d_batch.argtypes
 
 
+def _size_generator(
+    n_features: int, min_features: int, max_features: int, rounds: int
+) -> Generator[int, None, None]:
+    """Yield kernel sizes, progressively increasing from min to max."""
+    if n_features == 1:
+        while True:
+            yield 1
+
+    max_size = min(n_features, max_features)
+    sizes = list(range(min_features, max_size + 1))
+    rounds_per_size = max(1, rounds // len(sizes))
+
+    for size in sizes:
+        for _ in range(rounds_per_size):
+            yield size
+    # max size if more rounds needed
+    while True:
+        yield max_size
+
+
 class FeatureSelector(ABC):
     """
     Abstract base class for feature selection strategies.
@@ -179,37 +199,18 @@ class RandomSelector(FeatureSelector):
     ) -> int:
         self.n_features = n_features
         self._rng = np.random.default_rng(self.seed)
-        self._gen = self._feature_generator(
+        self._features = np.arange(n_features)
+        self._size_gen = _size_generator(
             n_features, min_features, max_features, rounds
         )
         return rounds
 
-    def _feature_generator(
-        self, n_features: int, min_features: int, max_features: int, rounds: int
-    ) -> Generator[list[int], None, None]:
-        """Yield random feature subsets, progressively increasing in size."""
-        if n_features == 1:
-            while True:
-                yield [0]
-
-        features = np.arange(n_features)
-        max_size = min(n_features, max_features)
-        sizes = list(range(min_features, max_size + 1))
-        rounds_per_size = max(1, rounds // len(sizes))
-
-        for size in sizes:
-            for _ in range(rounds_per_size):
-                self._rng.shuffle(features)
-                yield features[:size].tolist()
-        # max size if more rounds needed
-        while True:
-            self._rng.shuffle(features)
-            yield features[:max_size].tolist()
-
     def get_features(
         self, round_idx: int, residuals: np.ndarray
     ) -> tuple[FeatureConstructor, str]:
-        selected = next(self._gen)
+        size = next(self._size_gen)
+        self._rng.shuffle(self._features)
+        selected = self._features[:size].tolist()
         return ColumnSelector(self._complete_groups(selected)), "kernel"
 
 
@@ -223,7 +224,7 @@ class SmartSelector(FeatureSelector):
     redundancy_penalty : float, default=0.4
         Weight for redundancy penalty (0 = ignore, 1 = strong penalty)
     relevance_alpha : float, default=0.7
-        Balance between MI relevance (1.0) and historical weight (0.0)
+        Weigth for MI relevance (1.0) and historical weight (0.0)
     recency_penalty : float, default=0.35
         Penalty applied to recently-used features (0 = no penalty, 1 = strong)
     recency_decay : float, default=0.7
@@ -232,7 +233,7 @@ class SmartSelector(FeatureSelector):
         Softmax temperature (minimum when using schedule). Higher means more exploration.
     temperature_max : float | None, default=None
         Starting temperature for schedule. None means no schedule (fixed temperature).
-        Decays linearly from temperature_max to temperature over all rounds.
+        Decays linearly from temperature_max to temperature.
     weight_decay : float, default=0.95
         Decay factor for feature weights each round.
     relative_mi_floor : float, default=0.0
@@ -308,29 +309,10 @@ class SmartSelector(FeatureSelector):
         self.feature_weights_ = np.zeros(n_features)
         self.recency_scores_ = np.zeros(n_features)
         self._rng = np.random.default_rng(self.seed)
-        self._size_gen = self._size_generator(
+        self._size_gen = _size_generator(
             n_features, min_features, max_features, rounds
         )
         return rounds
-
-    def _size_generator(
-        self, n_features: int, min_features: int, max_features: int, rounds: int
-    ) -> Generator[int, None, None]:
-        """Yield kernel sizes, progressively increasing from min to max."""
-        if n_features == 1:
-            while True:
-                yield 1
-
-        max_size = min(n_features, max_features)
-        sizes = list(range(min_features, max_size + 1))
-        rounds_per_size = max(1, rounds // len(sizes))
-
-        for size in sizes:
-            for _ in range(rounds_per_size):
-                yield size
-        # max size if more rounds needed
-        while True:
-            yield max_size
 
     def get_features(
         self, round_idx: int, residuals: np.ndarray
@@ -357,6 +339,40 @@ class SmartSelector(FeatureSelector):
             weight_increment = gain / len(indices)
             for idx in indices:
                 self.feature_weights_[idx] += weight_increment
+
+    def _select_features(
+        self, k: int, relevance: np.ndarray, raw_mi: np.ndarray, round_idx: int
+    ) -> list[int]:
+        """Select k features probabilistically using relevance and redundancy."""
+        temp = self._get_temperature(round_idx)
+        selected = []
+        available = self._apply_mi_floor(k, raw_mi)
+
+        for _ in range(min(k, self.n_features)):
+            if not available:
+                break
+            scores = np.zeros(len(available))
+            for i, j in enumerate(available):
+                if selected:
+                    redundancy = np.mean(
+                        [abs(self.corr_matrix_[j, s]) for s in selected]
+                    )
+                else:
+                    redundancy = 0.0
+
+                scores[i] = relevance[j] - self.redundancy_penalty * redundancy
+
+            scaled = scores / temp
+            exp_scores = np.exp(scaled - scaled.max())
+            probs = exp_scores / exp_scores.sum()
+
+            idx = self._rng.choice(len(available), p=probs)
+            feat = available[idx]
+
+            selected.append(feat)
+            available.pop(idx)
+
+        return selected
 
     def _compute_relevance(
         self, pseudoresiduals: np.ndarray
@@ -407,36 +423,195 @@ class SmartSelector(FeatureSelector):
             self.temperature_max + (self.temperature - self.temperature_max) * progress
         )
 
-    def _select_features(
-        self, k: int, relevance: np.ndarray, raw_mi: np.ndarray, round_idx: int
-    ) -> list[int]:
-        """Select k features probabilistically using relevance and redundancy."""
-        temp = self._get_temperature(round_idx)
-        selected = []
-        available = self._apply_mi_floor(k, raw_mi)
 
-        for _ in range(min(k, self.n_features)):
-            if not available:
-                break
-            scores = np.zeros(len(available))
-            for i, j in enumerate(available):
-                if selected:
-                    redundancy = np.mean(
-                        [abs(self.corr_matrix_[j, s]) for s in selected]
-                    )
-                else:
-                    redundancy = 0.0
+class JMISelector(FeatureSelector):
+    """
+    Feature selection by joint mutual information (JMI, Yang & Moody 1999).
+    Uses the mean joint MI I((Xs, Xj); y) to measure relevance, redundancy
+    and synergy with the same metric. Kernel sizes progress from small to 
+    large.
 
-                scores[i] = relevance[j] - self.redundancy_penalty * redundancy
+    Args:
+    relevance_alpha : float, default=0.9
+        Weight for MI relevance (1.0) and historical weight (0.0)
+    recency_penalty : float, default=0.35
+        Penalty applied to recently-used features (0 = no penalty, 1 = strong)
+    recency_decay : float, default=0.7
+        Decay factor for recency penalty each round (0 = instant decay, 1 = no decay)
+    temperature : float, default=0.2
+        Softmax temperature. Higher means more exploration.
+    weight_decay : float, default=0.95
+        Decay factor for feature weights each round.
+    samples_per_cell : int, default=20
+        Target samples for MI estimation per bin.
+    feature_groups : list[list[int]] | None, default=None
+        Groups of features that should be selected together.
+    constant_tree_frequency : int, default=25
+        Insert a constant-leaf tree every N rounds.
+    seed : int, optional
+        Random seed for reproducibility.
+    """
 
-            scaled = scores / temp
-            exp_scores = np.exp(scaled - scaled.max())
-            probs = exp_scores / exp_scores.sum()
+    def __init__(
+        self,
+        relevance_alpha: float = 0.9,
+        recency_penalty: float = 0.35,
+        recency_decay: float = 0.7,
+        temperature: float = 0.2,
+        weight_decay: float = 0.95,
+        samples_per_cell: int = 20,
+        feature_groups: list[list[int]] | None = None,
+        constant_tree_frequency: int = 25,
+        seed: int | None = None,
+    ):
+        super().__init__()
+        self.relevance_alpha = relevance_alpha
+        self.recency_penalty = recency_penalty
+        self.recency_decay = recency_decay
+        self.temperature = temperature
+        self.weight_decay = weight_decay
+        self.samples_per_cell = samples_per_cell
+        self.feature_groups = feature_groups
+        self.seed = seed if seed is not None else np.random.randint(0, 2**31)
 
-            idx = self._rng.choice(len(available), p=probs)
-            feat = available[idx]
+        self.constant_frequency = constant_tree_frequency
 
+    def initialize(
+        self,
+        X: np.ndarray,
+        n_features: int,
+        min_features: int,
+        max_features: int,
+        rounds: int,
+    ) -> int:
+        self.n_features = n_features
+        self.X_ = X.view()
+        n = X.shape[0]
+        spc = self.samples_per_cell
+        self.n_bins_2d_ = max(10, int(np.sqrt(n / spc)))
+        self.n_bins_3d_ = max(4, int((n / spc) ** (1 / 3)))
+        self.rounds_ = rounds
+
+        # quantile thresholds at both scales; a row of the 3D table doubles
+        # as z-thresholds when that feature is the selected anchor
+        self.quantiles_2d_ = np.linspace(0, 1, self.n_bins_2d_ + 1)
+        self.quantiles_3d_ = np.linspace(0, 1, self.n_bins_3d_ + 1)
+        self.x_thresholds_2d_ = np.array(
+            [np.quantile(X[:, f], self.quantiles_2d_) for f in range(n_features)],
+            dtype=np.float32,
+        )
+        self.x_thresholds_3d_ = np.array(
+            [np.quantile(X[:, f], self.quantiles_3d_) for f in range(n_features)],
+            dtype=np.float32,
+        )
+
+        self.feature_weights_ = np.zeros(n_features)
+        self.recency_scores_ = np.zeros(n_features)
+        self._rng = np.random.default_rng(self.seed)
+        self._size_gen = _size_generator(
+            n_features, min_features, max_features, rounds
+        )
+        return rounds
+
+    def get_features(
+        self, round_idx: int, residuals: np.ndarray
+    ) -> tuple[FeatureConstructor, str]:
+        if round_idx > 0 and round_idx % self.constant_frequency == 0:
+            tree_type = "constant"
+            selected = list(range(self.n_features))
+        else:
+            tree_type = "kernel"
+            k = next(self._size_gen)
+            selected = self._select_features(k, residuals)
+
+        return ColumnSelector(self._complete_groups(selected)), tree_type
+
+    def update(self, constructor: FeatureConstructor, gain: float) -> None:
+        indices = list(constructor.source_features)
+        self.recency_scores_ *= self.recency_decay
+        for idx in indices:
+            self.recency_scores_[idx] = 1.0
+
+        self.feature_weights_ *= self.weight_decay
+        if gain > 0:
+            weight_increment = gain / len(indices)
+            for idx in indices:
+                self.feature_weights_[idx] += weight_increment
+
+    def _select_features(self, k: int, pseudoresiduals: np.ndarray) -> list[int]:
+        """Greedy JMI selection: marginal MI for the first feature, mean
+        joint MI with the selected anchors for the rest."""
+        residuals = np.ascontiguousarray(pseudoresiduals.ravel(), dtype=np.float32)
+        X32 = np.ascontiguousarray(self.X_, dtype=np.float32)
+        y_thr_2d = np.quantile(residuals, self.quantiles_2d_).astype(np.float32)
+        y_thr_3d = np.quantile(residuals, self.quantiles_3d_).astype(np.float32)
+        weights_norm = self.feature_weights_ / (self.feature_weights_.max() + 1e-10)
+
+        n_pick = min(k, self.n_features)
+        scores = self._marginal_mi(X32, residuals, y_thr_2d)
+        selected: list[int] = []
+        joint_sum = np.zeros(self.n_features)
+
+        for _ in range(n_pick):
+            avail = np.setdiff1d(np.arange(self.n_features), selected)
+            feat = self._sample_feature(scores, avail, weights_norm)
             selected.append(feat)
-            available.pop(idx)
+            if len(selected) < n_pick:
+                joint_sum += self._joint_mi(feat, X32, residuals, y_thr_3d)
+                scores = joint_sum / len(selected)
 
         return selected
+
+    def _sample_feature(
+        self, scores: np.ndarray, avail: np.ndarray, weights_norm: np.ndarray) -> int:
+        """Blend step scores with history and recency, softmax, draw one.
+        Scores are normalized within each step to bring them to the same
+        scale."""
+        scores_norm = scores[avail] / (scores[avail].max() + 1e-10)
+        blended = (
+            self.relevance_alpha * scores_norm
+            + (1 - self.relevance_alpha) * weights_norm[avail]
+            - self.recency_penalty * self.recency_scores_[avail]
+        )
+        scaled = blended / self.temperature
+        probs = np.exp(scaled - scaled.max())
+        probs /= probs.sum()
+        return int(avail[self._rng.choice(len(avail), p=probs)])
+
+    def _marginal_mi(
+        self, X32: np.ndarray, residuals: np.ndarray, y_thresholds: np.ndarray
+    ) -> np.ndarray:
+        """Grassberger MI of every feature with the residuals (2D scale)."""
+        out = np.zeros(self.n_features, dtype=np.float32)
+        _mi_lib.histogram_mi_batch_gr(
+            X32,
+            residuals,
+            X32.shape[0],
+            self.n_features,
+            self.x_thresholds_2d_,
+            y_thresholds,
+            self.n_bins_2d_ + 1,
+            out,
+        )
+        return out.astype(np.float64)
+
+    def _joint_mi(
+        self, anchor: int, X32: np.ndarray, residuals: np.ndarray,
+        y_thresholds: np.ndarray,
+    ) -> np.ndarray:
+        """Grassberger joint MI I((X_anchor, Xj); y) for every feature j
+        (3D scale)."""
+        out = np.zeros(self.n_features, dtype=np.float32)
+        _mi_lib.histogram_mi_3d_batch_gr(
+            np.ascontiguousarray(X32[:, anchor]),
+            X32,
+            residuals,
+            X32.shape[0],
+            self.n_features,
+            self.x_thresholds_3d_[anchor],
+            self.x_thresholds_3d_,
+            y_thresholds,
+            self.n_bins_3d_ + 1,
+            out,
+        )
+        return out.astype(np.float64)
