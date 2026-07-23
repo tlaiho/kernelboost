@@ -29,6 +29,7 @@ except OSError:
         f"-lm -fopenmp -O3 -march=native -ffast-math -funroll-loops -flto"
     )
 
+# naive histogram based 2D MI estimator
 _mi_lib.histogram_mi_batch.restype = None
 _mi_lib.histogram_mi_batch.argtypes = (
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # X
@@ -40,6 +41,29 @@ _mi_lib.histogram_mi_batch.argtypes = (
     ctypes.c_int,  # n_thresh
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # out_mi
 )
+
+# Grassberger-corrected 2D MI estimator 
+_mi_lib.histogram_mi_batch_gr.restype = None
+_mi_lib.histogram_mi_batch_gr.argtypes = _mi_lib.histogram_mi_batch.argtypes
+
+# naive histogram based 3D MI estimator
+_mi_lib.histogram_mi_3d_batch.restype = None
+_mi_lib.histogram_mi_3d_batch.argtypes = (
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # z
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # X
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # y
+    ctypes.c_int,  # n
+    ctypes.c_int,  # n_candidates
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # z_thresholds
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # x_thresholds
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # y_thresholds
+    ctypes.c_int,  # n_thresh
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # out_mi
+)
+
+# Grassberger-corrected 3D MI eestimator
+_mi_lib.histogram_mi_3d_batch_gr.restype = None
+_mi_lib.histogram_mi_3d_batch_gr.argtypes = _mi_lib.histogram_mi_3d_batch.argtypes
 
 
 class FeatureSelector(ABC):
