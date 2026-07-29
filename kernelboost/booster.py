@@ -638,6 +638,52 @@ class KernelBooster:
         raw_predictions = self.predict(X)
         return self.objective.inverse_link(raw_predictions)
 
+    def staged_predict(self, X: np.ndarray, max_rounds: int = None):
+        """
+        Yield predictions after each boosting round.
+
+        Note the default differs from predict(): this sweeps ALL rounds, since
+        the point is usually to see past the early-stopping cutoff.
+
+        Args:
+        X : np.ndarray of shape (n_samples, n_features)
+            Features to predict on.
+        max_rounds : int, optional
+
+        Yields:
+        np.ndarray of shape (n_samples,)
+        """
+        if not hasattr(self, "trees_"):
+            raise RuntimeError("Booster not fitted. Call fit() first.")
+
+        if max_rounds is None:
+            max_rounds = len(self.trees_)
+        elif not 0 <= max_rounds <= len(self.trees_):
+            raise ValueError(
+                f"max_rounds must be between 0 and {len(self.trees_)}, got {max_rounds}"
+            )
+
+        predictions = np.zeros(X.shape[0])
+        yield predictions + self.f_init_.item()
+
+        for i in range(max_rounds):
+            if self.rho_[i] != 0:
+                prediction_features = self.feature_constructors_[i].transform(X)
+                predictions += (
+                    self.rho_[i] * self.trees_[i].predict(prediction_features).ravel()
+                )
+            yield predictions + self.f_init_.item()
+
+    def staged_predict_proba(self, X: np.ndarray, max_rounds: int = None):
+        """Yield class probabilities after each boosting round."""
+        if not self.objective.is_classifier:
+            raise ValueError(
+                "staged_predict_proba only available for classification objectives"
+            )
+
+        for raw_predictions in self.staged_predict(X, max_rounds=max_rounds):
+            yield self.objective.inverse_link(raw_predictions)
+
     def fit_predict(
         self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray = None
     ) -> np.ndarray:

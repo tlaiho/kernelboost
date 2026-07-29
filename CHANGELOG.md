@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - AICc-based bandwidth optimization (`precision_method='pilot-aicc'`).
 - Feature construction layer (`FeatureConstructor`, `ColumnSelector`) integrated into boosters and `RhoOptimizer`.
 - `aggregation='wmean'` for `predict_variance()`: inverse-LOO-error weighted averaging of variance trees.
+- `staged_predict()` / `staged_predict_proba()`: generators yielding the prediction after each boosting round.
 
 ### Changed
 - Default feature selector changed from `RandomSelector` to `JMISelector`.
