@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 from kernelboost import KernelBooster
-from kernelboost.feature_selection import SmartSelector
+from kernelboost.feature_selection import JMISelector
 from kernelboost.objectives import MSEObjective
 from kernelboost.utilities import RankTransformer
 
@@ -47,11 +47,7 @@ if __name__ == "__main__":
     X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)
 
-    selector = SmartSelector(
-        redundancy_penalty=0.4,
-        relevance_alpha=0.8,
-        temperature=0.15,
-        temperature_max=0.30,
+    selector = JMISelector(
         feature_groups=[[6, 7]],
         constant_tree_frequency=20,
     )

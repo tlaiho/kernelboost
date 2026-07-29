@@ -655,9 +655,12 @@ class KernelBooster:
         refit: bool = False,
     ) -> np.ndarray:
         """
-        EXPERIMENTAL. Predict conditional quantiles. Uses dedicated quantile 
-        trees fit on final-model residuals (Hall–Wolff–Yao (1999) style): 
-        predict(x) + Q_tau(residual | x) per tree, aggregated across trees. 
+        EXPERIMENTAL. Predict conditional quantiles. Uses dedicated quantile
+        trees fit on evaluation-set residuals (Hall–Wolff–Yao (1999) style):
+        predict(x) + Q_tau(residual | x) per tree, aggregated across trees.
+        Requires eval_set: fitting quantile trees on training residuals is not
+        supported, as boosting leaves no conditional mean signal in them and
+        the fits collapse to unconditional residuals.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
@@ -674,12 +677,12 @@ class KernelBooster:
         aggregation : str, default='mean'
             How to combine quantile estimates across trees: 'mean' or 'median'.
             Query-time argument, never triggers a refit.
-        eval_set : tuple of (X_val, y_val), optional
-            If provided, quantile trees are fit on residuals of this dataset
-            instead of training data. Consulted at first fit.
+        eval_set : tuple of (X_val, y_val)
+            Held-out data whose residuals the quantile trees are fit on.
+            Required whenever trees are (re)fitted; cached-tree queries may
+            omit it.
         overfit_correction : bool, default=True
-            Subtract the LOO gap from training predictions before computing
-            residuals. Ignored with eval_set.
+            Ignored: quantile trees are always fit on eval_set residuals.
         refit : bool, default=False
             Quantile trees are fit on the first call and cached. Pass
             refit=True to force refitting with the current arguments.
@@ -713,6 +716,10 @@ class KernelBooster:
             n_trees = min(5, self.last_active_tree_idx_ + 1)
 
         if refit or self.quantile_trees_ is None:
+            if eval_set is None:
+                raise ValueError(
+                    "predict_quantiles requires eval_set."
+                )
             self._fit_quantile_trees(n_trees, eval_set, overfit_correction)
 
         predictions = self.predict(X).ravel()
@@ -746,18 +753,18 @@ class KernelBooster:
         overfit_correction: bool = True,
         refit: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Convenience wrapper over predict_quantiels for a prediction interval. 
+        """Convenience wrapper over predict_quantiels for a prediction interval.
         Returns (lower, upper)."""
         if not 0 < alpha < 1:
             raise ValueError(f"alpha must be in (0, 1), got {alpha}")
 
         quantiles = self.predict_quantiles(
-            X, 
+            X,
             (alpha / 2, 1 - alpha / 2),
-            n_trees=n_trees, 
-            aggregation=aggregation, 
+            n_trees=n_trees,
+            aggregation=aggregation,
             eval_set=eval_set,
-            overfit_correction=overfit_correction, 
+            overfit_correction=overfit_correction,
             refit=refit,
         )
         return quantiles[0], quantiles[1]
@@ -777,7 +784,7 @@ class KernelBooster:
         on training data, raw residuals are suppressed by each observation's own 
         contribution to its prediction; by default this is corrected by subtracting 
         the LOO gap (_training_loo_gap) before squaring. The correction removes 
-        own-observation variance leakage only, and thus estimation bias both at the mean 
+        own-observation variance leakage, but estimation bias both at the mean 
         and variance stages are still present. 
 
         Args:
@@ -790,6 +797,8 @@ class KernelBooster:
             How to combine variances from multiple trees:
             - 'median': median variance (more accurate and robust in benchmarks)
             - 'mean': average variance
+            - 'wmean': average weighted by inverse squared LOO error of each
+              variance tree on its fitting target
         eval_set : tuple of (X_val, y_val), optional.
             If provided variance estimation will be done on this dataset
             instead of training data.
@@ -807,9 +816,9 @@ class KernelBooster:
         if not hasattr(self, "trees_"):
             raise RuntimeError("Booster not fitted. Call fit() first.")
 
-        if aggregation not in ("mean", "median"):
+        if aggregation not in ("mean", "median", "wmean"):
             raise ValueError(
-                f"aggregation must be 'mean' or 'median', got {aggregation}"
+                f"aggregation must be 'mean', 'median' or 'wmean', got {aggregation}"
             )
 
         if self.last_active_tree_idx_ is None:
@@ -834,7 +843,12 @@ class KernelBooster:
 
         if aggregation == "median":
             return np.maximum(np.median(variances, axis=0), 0.0)
-        
+
+        if aggregation == "wmean":
+            weights = np.asarray(self.variance_tree_errors_) ** -2
+            weights = weights / weights.sum()
+            return np.maximum(weights @ variances, 0.0)
+
         return np.maximum(np.mean(variances, axis=0), 0.0)
 
     def _fit_variance_trees(
@@ -847,8 +861,11 @@ class KernelBooster:
 
         self.variance_trees_ = []
         self.variance_constructors_ = []
+        self.variance_tree_errors_ = []
 
         for idx in tree_indices:
+            if not all(self.trees_[idx].compiled_.is_kernel):
+                continue
             constructor = self.feature_constructors_[idx]
             var_tree = KernelTree(
                 **self.tree_optimization,
@@ -856,12 +873,27 @@ class KernelBooster:
                 **self.kernel_optimization,
             )
             X_fit = eval_set[0] if eval_set else self.X_ # fit for all data or subsample?
-            var_tree.fit(
-                constructor.transform(X_fit),
-                squared_residuals.reshape(-1, 1),
-            )
+            X_t = constructor.transform(X_fit)
+            var_tree.fit(X_t, squared_residuals.reshape(-1, 1))
             self.variance_trees_.append(var_tree)
             self.variance_constructors_.append(constructor)
+            self.variance_tree_errors_.append(
+                self._tree_loo_error(var_tree, X_t, squared_residuals)
+            )
+
+        if not self.variance_trees_:
+            raise ValueError(
+                "Last n trees had constant leaves, no variance estimation possible."
+            )
+
+    @staticmethod
+    def _tree_loo_error(tree: KernelTree, X: np.ndarray, y: np.ndarray) -> float:
+        """LOO-CV MSE of a fitted tree on its own training target, reconstructed
+        from self-weights: loo_pred = (pred - s*y) / (1 - s)."""
+        pred = tree.predict(X).ravel()
+        s = tree.self_weights(X).ravel()
+        loo = (pred - s * y) / np.clip(1.0 - s, 1e-6, None)
+        return float(np.mean((y - loo) ** 2))
 
     def _fit_quantile_trees(
         self, n_trees: int, eval_set: tuple = None, correct: bool = True

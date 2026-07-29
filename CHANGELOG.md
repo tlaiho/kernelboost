@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-07-29
+
+### Added
+- LOO training residuals for uncertainty quantification, used by `predict_variance()` (`overfit_correction` parameter).
+- `predict_quantiles()` method (experimental) for conditional quantile prediction from evaluation-set residuals (`eval_set` required).
+- `JMISelector`: joint-mutual-information feature selection with Grassberger-corrected MI estimators.
+- AICc-based bandwidth optimization (`precision_method='pilot-aicc'`).
+- Feature construction layer (`FeatureConstructor`, `ColumnSelector`) integrated into boosters and `RhoOptimizer`.
+- `aggregation='wmean'` for `predict_variance()`: inverse-LOO-error weighted averaging of variance trees.
+
+### Changed
+- Default feature selector changed from `RandomSelector` to `JMISelector`.
+- Default `search_rounds` changed from 20 to 10.
+- `feature_importances_` is now gain-based.
+- Breaking: `predict_intervals()` now requires `eval_set` (training-residual quantile trees collapse to unconditional quantiles).
+
+### Deprecated
+- `SmartSelector`: kept for backward compatibility only; use `JMISelector` instead.
+
+### Fixed
+- LOO variance and LOO quantile computation bugs.
+- Self-weight and LOO-CV guards tightened in bandwidth search.
+- Tree density split recursion bug.
+- Booster seeding.
+- Pilot bound estimation on the GPU path.
+
 ## [0.3.2] - 2026-04-26
 
 ### Added

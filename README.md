@@ -7,7 +7,7 @@
 ![C](https://img.shields.io/badge/C-language-blue)
 ![GPU](https://img.shields.io/badge/GPU-CUDA%20C%2FCuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.3.2-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 
 kernelboost is a gradient boosting algorithm that uses Nadaraya-Watson (local constant) kernel estimators as base learners instead of decision trees. It has:
 
@@ -59,7 +59,7 @@ With [suitable preprocessing](#data-preprocessing), kernelboost can match popula
 
 There are three main components to kernelboost: KernelBooster class that does the boosting, KernelTree class that does the splitting and KernelEstimator class that implements the local constant estimation. As kernel methods are computationally expensive, the guiding principle has been computational efficiency.  
 
-After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is random with increasing kernel sizes in terms of number of features. Random feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more boosting iterations. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
+After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is probabilistic, based on joint mutual information (JMISelector), with kernel sizes increasing in terms of number of features. Probabilistic feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more boosting iterations. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
 
 KernelTree splits numerical data by density and categorical data by MSE. It can also fit pure decision trees with mean values at leaves. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a nice 90% of compute.
 
@@ -71,14 +71,14 @@ Beyond the core boosting algorithm, a few features worth highlighting:
 
 #### Smart Feature Selection
 
-While the default feature selection is random (RandomSelector), the package includes an mRMR style probabilistic algorithm (SmartSelector) based on mutual information between features and pseudo-residuals and loss gain in previous boosting rounds.
+The default selector (JMISelector) is a probabilistic algorithm based on joint mutual information (Yang & Moody 1999) between features and pseudo-residuals, measuring relevance, redundancy and synergy with the same metric. Purely random selection is available through RandomSelector.
 
 ```python
-from kernelboost.feature_selection import SmartSelector
+from kernelboost.feature_selection import JMISelector
 
-selector = SmartSelector(
-    redundancy_penalty=0.4,
+selector = JMISelector(
     relevance_alpha=0.7,
+    temperature=0.3,
 )
 
 booster = KernelBooster(
@@ -112,17 +112,18 @@ lambda1, learning_rate = opt.find_hyperparameters()
 
 #### Uncertainty Quantification (Experimental)
 
-KernelBooster has both prediction intervals and conditional variance prediction (Fan & Yao 1998) based on kernel estimation. These require no extra data and in that sense come for "free" on top of training. Still work in progress.
+KernelBooster has conditional quantile prediction (Hall, Wolff & Yao 1999) with a prediction interval wrapper, and conditional variance prediction (Fan & Yao 1998), all based on kernel estimation. Quantile and interval prediction require held-out data (eval_set); variance prediction also works on training data alone. Still work in progress.
 
 ```python
-# Prediction intervals (90% by default)
-lower, upper = booster.predict_intervals(X, alpha=0.1)
+# Conditional quantiles and intervals (eval_set required)
+quantiles = booster.predict_quantiles(X, taus=(0.05, 0.5, 0.95), eval_set=(X_val, y_val))
+lower, upper = booster.predict_intervals(X, alpha=0.1, eval_set=(X_val, y_val))
 
 # Conditional variance estimates
 variance = booster.predict_variance(X)
 ```
 
-Both interval coverage and conditional variance have a tendency to be underestimated. This is probably because the training residuals are compressed compared to true residuals. Variance prediction also supports passing in evaluation data through eval_set (X, y tuple) argument. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
+All methods fit dedicated trees on model residuals. Quantile trees are fit on eval_set residuals: fitting them on training residuals collapses to unconditional quantiles, as boosting leaves no conditional mean signal in the residuals. Variance trees fit on training data are corrected with leave-one-out residuals by default (overfit_correction argument). See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
 
 #### Data Preprocessing
 
@@ -147,7 +148,7 @@ Like other kernel methods, kernelboost works best with continuous, smooth featur
 | `MSEObjective` | Mean squared error (regression) |
 | `EntropyObjective` | Cross-entropy (binary classification) |
 | `QuantileObjective` | Pinball loss (quantile regression) |
-| `SmartSelector` | mRMR-style feature selection |
+| `JMISelector` | Joint-MI feature selection (default) |
 | `RandomSelector` | Random feature selection |
 | `RhoOptimizer` | Post-hoc step size optimization |
 | `RankTransformer` | Rank-based feature scaling |

@@ -18,7 +18,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVR
 from kernelboost import KernelBooster
-from kernelboost.feature_selection import SmartSelector
+from kernelboost.feature_selection import JMISelector
 from kernelboost.objectives import MSEObjective
 from kernelboost.utilities import RankTransformer
 
@@ -86,11 +86,7 @@ if __name__ == "__main__":
     results = []
 
     print("\nTraining kernelboost...")
-    selector = SmartSelector(
-        redundancy_penalty=0.4,
-        relevance_alpha=0.8,
-        temperature=0.15,
-        temperature_max=0.30,
+    selector = JMISelector(
         feature_groups=[[6, 7]],
         constant_tree_frequency=20,
     )
@@ -165,7 +161,9 @@ if __name__ == "__main__":
 
     # kernelboost uncertainty
     kb_pred = kb.predict(X_test).ravel()
-    kb_lower, kb_upper = kb.predict_intervals(X_test, alpha=alpha)
+    kb_lower, kb_upper = kb.predict_intervals(
+        X_test, alpha=alpha, eval_set=(X_val, y_val)
+    )
     kb_variance = kb.predict_variance(X_test)
     kb_coverage, kb_width = evaluate_intervals(y_test, kb_lower, kb_upper)
     kb_var_corr, kb_var_ratio = evaluate_variance(y_test, kb_pred, kb_variance)

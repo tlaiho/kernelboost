@@ -17,7 +17,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from kernelboost import KernelBooster
-from kernelboost.feature_selection import SmartSelector
+from kernelboost.feature_selection import JMISelector
 from kernelboost.objectives import EntropyObjective
 from kernelboost.utilities import RankTransformer
 
@@ -56,11 +56,7 @@ if __name__ == "__main__":
     X_test = scaler.transform(X_test)
 
     #  kernelboost 
-    selector = SmartSelector(
-        relevance_alpha=0.7,
-        temperature=0.4,
-        relative_mi_floor=0.3,
-    )
+    selector = JMISelector()
 
     kb = KernelBooster(
         objective=EntropyObjective(),
