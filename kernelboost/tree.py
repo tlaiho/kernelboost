@@ -58,7 +58,8 @@ class CompiledTree:
         X_num: np.ndarray | None = None,
         quantiles: tuple = (0.1, 0.5, 0.9)
     ) -> np.ndarray:
-        """EXPERIMENTAL. Predict conditional quantiles."""
+        """EXPERIMENTAL. Predict conditional quantiles using single kernel approach
+        similar to Hall–Wolff–Yao (1999)."""
         n = X.shape[0]
         result = np.zeros((n, len(quantiles)), dtype=np.float32)
 
@@ -133,7 +134,7 @@ class KernelTree:
         Whether to use GPU acceleration for kernel estimation.
     kernel_type : str, default='gaussian'
         Kernel type: 'gaussian' or 'laplace'.
-    search_rounds : int, default=20
+    search_rounds : int, default=10
         Number of optimization rounds for precision search in kernel estimators.
     bounds : tuple, default=(0.10, 35.0)
         Lower and upper bounds for precision optimization.
@@ -142,7 +143,8 @@ class KernelTree:
     sample_share : float, default=1.0
         Fraction of data to use for precision optimization.
     precision_method : str, default='pilot-cv'
-        Precision selection method: 'search' (LOO-CV) or 'silverman'.
+        Precision selection method: 'search' (LOO-CV), 'pilot-cv' (pilot bounds,
+        then LOO-CV), 'pilot-aicc' (pilot bounds, then AICc) or 'silverman'.
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     seed : int, np.random.Generator, or None, default=None
@@ -165,7 +167,7 @@ class KernelTree:
         overlap_epsilon: float = 0.05,
         use_gpu: bool = False,
         kernel_type: str = 'laplace',
-        search_rounds: int = 20,
+        search_rounds: int = 10,
         bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
@@ -219,6 +221,10 @@ class KernelTree:
     def _validate_params(self):
         if self.kernel_type not in {'gaussian', 'laplace'}:
             raise ValueError(f"kernel_type must be 'gaussian' or 'laplace', got '{self.kernel_type}'")
+        if self.precision_method not in {'search', 'pilot-cv', 'pilot-aicc', 'silverman'}:
+            raise ValueError(
+                f"precision_method must be 'search', 'pilot-cv', 'pilot-aicc' or 'silverman', "
+                f"got '{self.precision_method}'")
         if self.min_sample <= 0:
             raise ValueError("min_sample must be positive")
         if self.max_sample <= self.min_sample:

@@ -1,6 +1,6 @@
 import numpy as np
 from .tree import KernelTree
-from .feature_selection import FeatureSelector, RandomSelector
+from .feature_selection import FeatureSelector, JMISelector
 from .feature_construction import ColumnSelector
 
 
@@ -13,7 +13,7 @@ class KernelBooster:
         Loss function (e.g., MSEObjective(), EntropyObjective()).
     feature_selector : FeatureSelector, default=None
         Feature selection strategy. If None and feature_tree_tuple not provided,
-        defaults to RandomSelector.
+        defaults to JMISelector.
     feature_names : list, default=None
         Names for features. Uses indices if None.
     min_features : int, default=1
@@ -43,10 +43,11 @@ class KernelBooster:
     kernel_type : str, default='laplace'
         Kernel type: 'gaussian' or 'laplace'.
     precision_method : str, default='pilot-cv'
-        Precision optimization method.
+        Precision selection method: 'search' (LOO-CV), 'pilot-cv' (pilot bounds,
+        then LOO-CV), 'pilot-aicc' (pilot bounds, then AICc) or 'silverman'.
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
-    search_rounds : int, default=20
+    search_rounds : int, default=10
         Precision optimization iterations.
     bounds : tuple, default=(0.10, 35.0)
         Precision search bounds.
@@ -86,7 +87,7 @@ class KernelBooster:
         kernel_type: str = "laplace",
         precision_method: str = "pilot-cv",
         pilot_factor: float = 3.0,
-        search_rounds: int = 20,
+        search_rounds: int = 10,
         bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
@@ -149,6 +150,11 @@ class KernelBooster:
         if self.kernel_type not in {"gaussian", "laplace"}:
             raise ValueError(
                 f"kernel_type must be 'gaussian' or 'laplace', got '{self.kernel_type}'"
+            )
+        if self.precision_method not in {"search", "pilot-cv", "pilot-aicc", "silverman"}:
+            raise ValueError(
+                f"precision_method must be 'search', 'pilot-cv', 'pilot-aicc' or 'silverman', "
+                f"got '{self.precision_method}'"
             )
         if self.max_sample <= self.min_sample:
             raise ValueError(
@@ -357,17 +363,17 @@ class KernelBooster:
             s_kernel = None
             selector_seed = None
 
-        # priority: explicit feature_tree_tuple > feature_selector > default random
+        # priority: explicit feature_tree_tuple > feature_selector > default JMI
         if self.feature_tree_tuple is not None:
             self.n_estimators_ = len(self.feature_tree_tuple)
             self.feature_tree_tuple_ = self.feature_tree_tuple
             self._use_selector = False
         else:
-            # default to RandomSelector if no Selector given
+            # default to JMISelector if no Selector given
             if self.feature_selector is not None:
                 selector = self.feature_selector
             else:
-                selector = RandomSelector(seed=selector_seed)
+                selector = JMISelector(seed=selector_seed)
                 self.feature_selector = selector
 
             self.n_estimators_ = selector.initialize(
@@ -969,6 +975,7 @@ class KernelBooster:
             "initial_precision": self.initial_precision,
             "sample_share": self.sample_share,
             "precision_method": self.precision_method,
+            "pilot_factor": self.pilot_factor,
             "subsample_share": self.subsample_share,
             "stopping_threshold": self.stopping_threshold,
             "min_features": self.min_features,

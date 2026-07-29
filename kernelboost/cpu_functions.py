@@ -42,6 +42,7 @@ clib.predict.argtypes = (
 
 clib.loo_mse.restype = ctypes.c_float
 clib.loo_mse.argtypes = (
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # out_stats
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # training_dependent
     ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),  # training_features
     ctypes.c_float,   # precision
@@ -118,19 +119,23 @@ def cpu_loo_mse(
     precision: np.ndarray,
     kernel_type: int = 0,
     mean_y: float = 0.0,
-    ) -> float:
+    ) -> tuple:
     """Compute leave-one-out cross-validation error using symmetric kernel optimization.
     Uses float32 precision for consistency with GPU.
+
+    Returns (loo_mean, rss_sum, effective_sum).
     """
 
     if training_features.shape[0] <= 1:
-        return np.inf
+        return (np.inf, np.inf, 0.0)
 
     training_obs = training_dependent.shape[0]
     dimension = training_features.shape[1]
     training_features_1d = np.ravel(training_features).astype(np.float32)
+    out_stats = np.zeros(2, dtype=np.float32)
 
     result = clib.loo_mse(
+        out_stats,
         np.ascontiguousarray(training_dependent.astype(np.float32)),
         np.ascontiguousarray(training_features_1d),
         ctypes.c_float(precision[0]),
@@ -143,7 +148,7 @@ def cpu_loo_mse(
     if result < 0:
         raise MemoryError("C library failed to allocate memory for LOO-CV computation.")
 
-    return float(result)
+    return (float(result), float(out_stats[0]), float(out_stats[1]))
 
 
 def cpu_get_weights(

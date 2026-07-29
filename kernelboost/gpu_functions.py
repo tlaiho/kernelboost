@@ -87,12 +87,14 @@ def cuda_loo(t_dependent: np.ndarray,
              t_features: np.ndarray,
              precision: np.ndarray,
              kernel_type: int = 0,
-             mean_y: float = 0.0) -> np.ndarray:
+             mean_y: float = 0.0) -> tuple:
     """Compute leave-one-out cross-validation error on GPU. Uses the decomposition
-    where the weights of the LOO estimator are computed with rescaling by 1 - self weight.
+    where the weights of the LOO estimator are computed with rescaling by 1 - self-weight.
+
+    Returns (loo_mean, rss_sum, effective_sample);
     """
     if t_features.shape[0] <= 1:
-        return np.array(np.inf)
+        return (np.inf, np.inf, 0.0)
 
     k_matrix = _compute_weights(t_features, t_features, precision, kernel_type)
 
@@ -105,6 +107,8 @@ def cuda_loo(t_dependent: np.ndarray,
     bad_weight_mask = diag_weights > 1.0 - 1e-2  # guard against 1.0 self-weight
 
     predictions = cp.dot(k_matrix, c_td)
+    rss_sum = cp.sum((predictions - c_td) ** 2)
+    effective_sample = cp.sum(diag_weights)
 
     # clamp self weights to prevent division by near-zero
     k_matrix[diag_indices, diag_indices] = cp.minimum(diag_weights, 1.0 - 1e-2)
@@ -117,7 +121,7 @@ def cuda_loo(t_dependent: np.ndarray,
         l_errors[bad_weight_mask] = (c_td[bad_weight_mask] - mean_y) ** 2
 
     total_error = cp.sum(l_errors)
-    return cp.asnumpy(total_error / t_count)
+    return (float(total_error / t_count), float(rss_sum), float(effective_sample))
 
 
 def cuda_similarity(p_features: np.ndarray,

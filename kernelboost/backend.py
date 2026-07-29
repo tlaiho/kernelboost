@@ -88,9 +88,11 @@ class Backend:
     def loo_cv(self, training_dependent: np.ndarray,
                training_features: np.ndarray,
                precision: np.ndarray,
-               mean_y: float = 0.0) -> float:
+               mean_y: float = 0.0) -> tuple:
         """
-        Leave-one-out cross-validation error with given precision.
+        Leave-one-out cross-validation stats with given precision.
+
+        Returns (loo_mean, rss_sum, effective_sample)
 
         Args:
             training_dependent: (n_train,) or (n_train, 1)
@@ -103,8 +105,8 @@ class Backend:
         )
         if self.use_gpu:
             from .gpu_functions import cuda_loo
-            return float(cuda_loo(training_dependent, training_features, precision,
-                                  self._kernel_type_int, mean_y))
+            return cuda_loo(training_dependent, training_features, precision,
+                            self._kernel_type_int, mean_y)
         else:
             from .cpu_functions import cpu_loo_mse
             return cpu_loo_mse(training_dependent, training_features, precision,

@@ -16,6 +16,7 @@ def _validate_search_params(rounds: int, bounds: list) -> None:
 
 def uniform_search(
         func: Callable,
+        evaluate: Callable,
         t_dependent: np.ndarray,
         t_features: np.ndarray,
         rounds: int,
@@ -27,11 +28,11 @@ def uniform_search(
     """Perform random search using uniform distribution across bounds."""
     _validate_search_params(rounds, bounds)
     rng = rng or np.random.default_rng()
-    best, best_eval = initial_precision, float(func(t_dependent, t_features, initial_precision, mean_y))
+    best, best_eval = initial_precision, float(evaluate(func, t_dependent, t_features, initial_precision, mean_y))
 
     for k in range(rounds):
         candidate = np.array([rng.uniform(bounds[0], bounds[1])])
-        evaluation = func(t_dependent, t_features, candidate, mean_y)
+        evaluation = evaluate(func, t_dependent, t_features, candidate, mean_y)
 
         if evaluation < best_eval:
             best = candidate.copy()
@@ -42,6 +43,7 @@ def uniform_search(
 
 def normal_search(
         func: Callable,
+        evaluate: Callable,
         t_dependent: np.ndarray,
         t_features: np.ndarray,
         rounds: int,
@@ -55,7 +57,7 @@ def normal_search(
     rng = rng or np.random.default_rng()
     half_range = (bounds[1] - bounds[0]) / 2
     center = bounds[0] + half_range
-    best, best_eval = initial_precision, float(func(t_dependent, t_features, initial_precision, mean_y))
+    best, best_eval = initial_precision, float(evaluate(func, t_dependent, t_features, initial_precision, mean_y))
 
     for k in range(rounds):
         mean_shift = (center - best) * 0.3
@@ -66,7 +68,7 @@ def normal_search(
             )
             if not np.array_equal(candidate, best):
                 break
-        evaluation = func(t_dependent, t_features, candidate, mean_y)
+        evaluation = evaluate(func, t_dependent, t_features, candidate, mean_y)
 
         if evaluation < best_eval:
             best = candidate.copy()
@@ -87,6 +89,8 @@ def optimize_precision(
 
     Supports:
         - "search": LOO-CV with random search with given bounds (default)
+        - "pilot-cv": pilot-estimated bounds, then LOO-CV random search
+        - "pilot-aicc": pilot-estimated bounds, then AICc random search
         - "silverman": Silverman's rule-of-thumb (fast, no CV)
     """
     method = optimization_parameters.get("precision_method", "search")
@@ -98,10 +102,22 @@ def optimize_precision(
     bounds = optimization_parameters["bounds"]
     initial_precision = optimization_parameters["initial_precision"]
 
+    if method in ("pilot-cv", "pilot-aicc"):
+        bounds = estimate_bounds(
+            t_features,
+            t_dependent,
+            optimization_parameters["kernel_type"],
+            bounds,
+            optimization_parameters["pilot_factor"],
+        )
+
+    evaluate = aicc_evaluation if method == "pilot-aicc" else loo_evaluation
+
     if initial_precision == 0:
         init_val = np.atleast_1d((bounds[1] - bounds[0]) / 2)
         best, _ = uniform_search(
             func,
+            evaluate,
             t_dependent,
             t_features,
             search_rounds * 2,
@@ -113,6 +129,7 @@ def optimize_precision(
     else:
         best, _ = normal_search(
             func,
+            evaluate,
             t_dependent,
             t_features,
             search_rounds,
@@ -159,7 +176,12 @@ def estimate_bounds(
         bounds: tuple = (0.10, 35.0),
         factor: float = 3.0,
         ) -> tuple:
-    """Estimate bounds for precision using a polynomial pilot and AMISE formula."""
+    """Estimate bounds for precision using a polynomial pilot and AMISE loss."""
+
+    # CuPy arrays on the GPU path
+    if hasattr(t_features, 'get'):  
+        t_features = t_features.get()
+        t_dependent = t_dependent.get()
 
     y = np.asarray(t_dependent).flatten()
     n, d = t_features.shape
@@ -167,7 +189,7 @@ def estimate_bounds(
     if d > 75:
         return bounds   
 
-    # fit 1D cubic model for each feature: y = b0 + sum_j(b1j*xj + b2j*xj^2 + b3j*xj^3)  
+    # fit 1D cubic model for each feature: y = b0 + sum_j(b1j*xj + b2j*xj^2 + b3j*xj^3)
     design_matrix = np.column_stack([np.ones(n), t_features, t_features**2, t_features**3])
     coeffs, _, _, _ = np.linalg.lstsq(design_matrix, y, rcond=None)
     residuals = y - design_matrix @ coeffs
@@ -216,9 +238,29 @@ def estimate_bounds(
     return (lower, upper)
 
 
+def loo_evaluation(func: Callable, t_dependent, t_features, precision, mean_y) -> float:
+    """LOO-CV mean error of the candidate precision."""
+    return func(t_dependent, t_features, precision, mean_y)[0]
+
+
+def aicc_evaluation(func: Callable, t_dependent, t_features, precision, mean_y) -> float:
+    """AICc (Hurvich-Simonoff-Tsai 1998) of the candidate precision. Penalizes
+    predictions based on low relative effective sample size."""
+    _, residual_squares, degrees_of_freedom = func(t_dependent, t_features, precision, mean_y)
+    observations = t_dependent.shape[0]
+    n_diff = observations - degrees_of_freedom
+    if residual_squares <= 0.0 or n_diff - 2.0 <= 1e-3 * observations:
+        return np.inf
+    value = 1.0 + np.log(residual_squares / observations)
+    correction = 2.0 * (degrees_of_freedom + 1.0) / (n_diff - 2.0)
+    return value + correction
+
+
 def silverman_precision(t_features: np.ndarray, scale: float = 10.0) -> np.ndarray:
     """Scaled Silverman's rule-of-thumb precision. Useful for testing, but
     tends to oversmooth."""
+    if hasattr(t_features, 'get'):  # CuPy array on the GPU path
+        t_features = t_features.get()
     n, d = t_features.shape
     sigma = np.mean(np.std(t_features, axis=0))
     h = scale * sigma * np.power(n, -1.0 / (d + 4))

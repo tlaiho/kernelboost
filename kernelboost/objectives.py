@@ -159,6 +159,9 @@ class MSEObjective(Objective):
         covariance = np.dot(gradient.T, current_predictions).item() / n
         variance = np.dot(current_predictions.T, current_predictions).item() / n
 
+        if variance == 0.0:
+            return 0.0
+
         raw_rho = covariance / variance
 
         if abs(raw_rho) > lambda1:
@@ -326,6 +329,9 @@ class QuantileObjective(Objective):
         with L1 regularization and shrinkage. Uses backtracking for robustness."""
         covariance = np.dot(gradient.T, current_predictions).item() / n
         variance = np.dot(current_predictions.T, current_predictions).item() / n
+
+        if variance == 0.0:
+            return 0.0
 
         raw_rho = covariance / variance
 

@@ -58,6 +58,7 @@ void predict(
 #define TRI_IDX(i, j, n) ((i) * (n) - ((i) * ((i) - 1)) / 2 + ((j) - (i)))
 
 float loo_mse(
+    float * out_stats,  // out[0] = rss_sum, out[1] = df_sum
     float * training_dependent,
     float * training_features,
     float precision,
@@ -65,8 +66,9 @@ float loo_mse(
     int dimension,
     int kernel_type,
     float mean_y) {
-    // leave-one-out loss using symmetry of the kernel weights.  
+    // leave-one-out loss using symmetry of the kernel weights.
     // weights computed with rescaling by 1 - self_weight.
+    // out_stats outputs the in-sample RSS and effective_sample = sum(S_ii)
 
     int n = training_obs;
     size_t tri_size = (size_t)n * (n + 1) / 2;
@@ -95,7 +97,9 @@ float loo_mse(
 
     // second pass: compute LOO errors using symmetry
     float cv_error = 0;
-    #pragma omp parallel for reduction(+:cv_error)
+    float rss_sum = 0;
+    float effective_sample = 0;
+    #pragma omp parallel for reduction(+:cv_error,rss_sum,df_sum)
     for (int i = 0; i < n; i++) {
         float weight_sum = 0;
         float dependent_sum = 0;
@@ -111,7 +115,11 @@ float loo_mse(
         // self-weight = exp(0) = 1.0, normalized = 1/weight_sum
         float self_weight_norm = (weight_sum > 0) ? 1.0f / weight_sum : 1.0f;
 
-        if (weight_sum > 0 && self_weight_norm <= 1.0f - 1e-2f) { 
+        float in_residual = dependent_sum / weight_sum - training_dependent[i];
+        rss_sum += in_residual * in_residual;
+        effective_sample += self_weight_norm;
+
+        if (weight_sum > 0 && self_weight_norm <= 1.0f - 1e-2f) {
             // normal LOO calculation
             float prediction = dependent_sum / weight_sum;
             float scaled_error = (prediction - training_dependent[i])
@@ -125,6 +133,8 @@ float loo_mse(
     }
 
     free(upper);
+    out_stats[0] = rss_sum;
+    out_stats[1] = effective_sample;
     return cv_error / n;
 }
 

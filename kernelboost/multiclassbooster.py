@@ -21,7 +21,8 @@ class MulticlassBooster:
         Dict mapping class names to feature indices to use for that class.
         Allows different features per class. If None, all features used.
     feature_selector : FeatureSelector or None, default=None
-        FeatureSelector for KernelBoosters.
+        FeatureSelector for KernelBoosters. If None, each KernelBooster
+        defaults to JMISelector.
     feature_names : list, dict, or None, default=None
         - list: Same names for all classes
         - dict: Class-specific feature names
@@ -48,11 +49,12 @@ class MulticlassBooster:
         Overlap epsilon for kernel tree splits.
     kernel_type : str, default='laplace'
         Kernel type: 'gaussian' or 'laplace'.
-    search_rounds : int, default=20
+    search_rounds : int, default=10
         Precision optimization iterations.
     precision_method : str, default='pilot-cv'
-        Precision selection method: 'pilot-cv' (pilot bounds + LOO-CV),
-        'search' (LOO-CV with fixed bounds), or 'silverman' (rule-of-thumb).
+        Precision selection method: 'search' (LOO-CV), 'pilot-cv' (pilot bounds,
+        then LOO-CV), 'pilot-aicc' (pilot bounds, then AICc) or 'silverman'
+        (rule-of-thumb).
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     bounds : tuple, default=(0.20, 35.0)
@@ -93,7 +95,7 @@ class MulticlassBooster:
         kernel_type: str = 'laplace',
         precision_method: str = 'pilot-cv',
         pilot_factor: float = 3.0,
-        search_rounds: int = 20,
+        search_rounds: int = 10,
         bounds: tuple = (0.20, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,

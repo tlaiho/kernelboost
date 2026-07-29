@@ -1,6 +1,6 @@
 import numpy as np
 from .backend import Backend
-from .optimizer import optimize_precision, estimate_bounds
+from .optimizer import optimize_precision
 from .utilities import r2_score
 
 
@@ -13,7 +13,7 @@ class KernelEstimator:
         Whether to use GPU acceleration.
     kernel_type : str, default='laplace'
         Kernel type: 'gaussian' or 'laplace'.
-    search_rounds : int, default=20
+    search_rounds : int, default=10
         Number of optimization rounds for precision search.
     bounds : tuple, default=(0.10, 35.0)
         Lower and upper bounds for precision optimization.
@@ -22,8 +22,9 @@ class KernelEstimator:
     sample_share : float, default=1.0
         Fraction of data to use for precision optimization (for large datasets).
     precision_method : str, default='pilot-cv'
-        Precision selection method: 'search' (LOO-CV) 'pilot-CV' (bounds for pilot, then LOO-CV)
-        or 'silverman' (rule-of-thumb for testing).
+        Precision selection method: 'search' (LOO-CV), 'pilot-cv' (pilot bounds,
+        then LOO-CV), 'pilot-aicc' (pilot bounds, then AICc) or 'silverman'
+        (rule-of-thumb for testing).
     pilot_factor : float, default=3.0
         Multiplier for pilot precision bounds: search range is [p/factor, p*factor].
     seed : int, np.random.Generator, or None, default=None
@@ -35,7 +36,7 @@ class KernelEstimator:
         self,
         use_gpu: bool = False,
         kernel_type: str = 'laplace',
-        search_rounds: int = 20,
+        search_rounds: int = 10,
         bounds: tuple = (0.10, 35.0),
         initial_precision: float = 0.0,
         sample_share: float = 1.0,
@@ -45,6 +46,10 @@ class KernelEstimator:
     ):
         if kernel_type not in {'gaussian', 'laplace'}:
             raise ValueError(f"kernel_type must be 'gaussian' or 'laplace', got '{kernel_type}'")
+        if precision_method not in {'search', 'pilot-cv', 'pilot-aicc', 'silverman'}:
+            raise ValueError(
+                f"precision_method must be 'search', 'pilot-cv', 'pilot-aicc' or 'silverman', "
+                f"got '{precision_method}'")
 
         self.use_gpu = use_gpu
         self.kernel_type = kernel_type
@@ -102,7 +107,7 @@ class KernelEstimator:
         if self.n_samples_ > 1500 and sample_share < 1.0:
             tdata = np.concatenate((self.y_, self.X_), axis=1)
             sample_size = int(max(sample_share * tdata.shape[0], 1000))
-            sample = self._rng.choice(tdata, sample_size)
+            sample = self._rng.choice(tdata, sample_size, replace=False)
             y = np.ascontiguousarray(sample[:, 0].reshape(-1, 1))
             X = np.delete(sample, 0, axis=1)
         else:
@@ -110,11 +115,6 @@ class KernelEstimator:
             X = self.X_
 
         mean_y = float(np.mean(y))
-
-        if self.precision_method == 'pilot-cv':
-            self.kernel_optimization['bounds'] = estimate_bounds(
-                X, y, self.kernel_type, self.bounds, self.pilot_factor)
-            self.kernel_optimization['precision_method'] = 'search'
 
         if self.use_gpu:
             import cupy as cp
@@ -195,10 +195,7 @@ class KernelEstimator:
     ) -> np.ndarray:
         """
         Predict conditional quantiles using local constant (Nadaraya-Watson) estimator 
-        and the single-kernel approach. Computationally cheaper than the double kernel
-        approach in Hansen (2004), but precision suffers from the discreteness of the 
-        underlying dependent variable especially with sparse data.
-
+        and the single-kernel approach similar to Hall–Wolff–Yao (1999).
         Args:
             X: Features to predict on, shape (n_samples, n_features)
             quantiles:(default: 10th, 50th, 90th)
