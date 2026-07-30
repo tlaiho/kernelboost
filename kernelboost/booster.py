@@ -274,6 +274,12 @@ class KernelBooster:
         """
         self._validate_data(X, y)
 
+        if self.min_features > self.n_features_in_:
+            raise ValueError(
+                f"min_features ({self.min_features}) exceeds the number of "
+                f"features ({self.n_features_in_})"
+            )
+
         if eval_set is not None:
             if not isinstance(eval_set, (tuple, list)) or len(eval_set) != 2:
                 raise ValueError("eval_set must be a tuple of (X_val, y_val)")
@@ -302,7 +308,7 @@ class KernelBooster:
             self.n_estimators_ = self.n_estimators
 
         if self.max_features is None:
-            self.max_features_ = min(10, self.n_features_in_)
+            self.max_features_ = min(self.n_features_in_, max(10, self.min_features))
         else:
             self.max_features_ = self.max_features
 
