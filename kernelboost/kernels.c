@@ -58,7 +58,7 @@ void predict(
 #define TRI_IDX(i, j, n) ((i) * (n) - ((i) * ((i) - 1)) / 2 + ((j) - (i)))
 
 float loo_mse(
-    float * out_stats,  // out[0] = rss_sum, out[1] = df_sum
+    float * out_stats, 
     float * training_dependent,
     float * training_features,
     float precision,
@@ -99,7 +99,7 @@ float loo_mse(
     float cv_error = 0;
     float rss_sum = 0;
     float effective_sample = 0;
-    #pragma omp parallel for reduction(+:cv_error,rss_sum,df_sum)
+    #pragma omp parallel for reduction(+:cv_error,rss_sum,effective_sample)
     for (int i = 0; i < n; i++) {
         float weight_sum = 0;
         float dependent_sum = 0;

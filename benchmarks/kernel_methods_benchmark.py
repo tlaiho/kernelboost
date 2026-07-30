@@ -96,13 +96,13 @@ if __name__ == "__main__":
         feature_selector=selector,
         max_sample=3750,
         min_sample=700,
-        n_estimators=250,
+        n_estimators=200,
         subsample_share=0.8,
-        learning_rate=0.8,
+        learning_rate=0.5,
         min_features=1,
         max_features=5,
-        overlap_epsilon=0.05,
-        n_iter_no_change=25,
+        overlap_epsilon=0.1,
+        n_iter_no_change=30,
         use_gpu=use_gpu,
         verbose=0,
     )
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     kb_lower, kb_upper = kb.predict_intervals(
         X_test, alpha=alpha, eval_set=(X_val, y_val)
     )
-    kb_variance = kb.predict_variance(X_test)
+    kb_variance = kb.predict_variance(X_test, aggregation="wmean")
     kb_coverage, kb_width = evaluate_intervals(y_test, kb_lower, kb_upper)
     kb_var_corr, kb_var_ratio = evaluate_variance(y_test, kb_pred, kb_variance)
 

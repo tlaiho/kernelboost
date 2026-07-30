@@ -22,7 +22,7 @@ kernelboost is a gradient boosting algorithm that uses Nadaraya-Watson (local co
 pip install kernelboost
 
 # With GPU support (requires CUDA)
-pip install cupy-cuda12x  # for CUDA 12
+pip install cupy-cuda12x  # for CUDA 12; use cupy-cuda11x for CUDA 11
 ```
 
 > **Dependencies**: NumPy. CuPy optional for GPU acceleration.
@@ -33,8 +33,8 @@ pip install cupy-cuda12x  # for CUDA 12
 from kernelboost import KernelBooster, MulticlassBooster
 from kernelboost.objectives import MSEObjective, EntropyObjective
 
-# Regression
-booster = KernelBooster(objective=MSEObjective()).fit(X_train, y_train)
+# Regression (use_gpu=True enables the CuPy/CUDA backend)
+booster = KernelBooster(objective=MSEObjective(), use_gpu=True).fit(X_train, y_train)
 predictions = booster.predict(X_test)
 
 # Binary classification
@@ -53,7 +53,7 @@ kernelboost uses gradient boosting with kernel-based local constant estimators i
 
 ### What it delivers
 
-With [suitable preprocessing](#data-preprocessing), kernelboost can match popular gradient boosters like XGBoost and LightGBM on prediction accuracy while outperforming traditional kernel methods (KernelRidge, SVR, Gaussian Processes). Training time is comparable to other kernel methods. See [Benchmarks](#benchmarks) for detailed comparisons.
+With [suitable preprocessing](#data-preprocessing), kernelboost can match popular gradient boosters like XGBoost and LightGBM on prediction accuracy while outperforming traditional kernel methods (KernelRidge, SVR, Gaussian Processes). Training time is much slower than tree based methods but much faster than Gaussian processes. See [Benchmarks](#benchmarks) for detailed comparisons.
 
 ### Architecture
 
@@ -61,7 +61,7 @@ There are three main components to kernelboost: KernelBooster class that does th
 
 After calling fit, KernelBooster starts a training loop which is mostly identical to the algorithm described in Friedman (2001). The main difference is that KernelTree does not choose features through its splits but is instead given them by the booster class. Default feature selection is probabilistic, based on joint mutual information (JMISelector), with kernel sizes increasing in terms of number of features. Probabilistic feature selection naturally creates randomness to training results, which can be mitigated with a lower learning rate and more boosting iterations. Similarly to Friedman (2001), KernelBooster can fit several different objective functions, which are passed in as an Objective class. 
 
-KernelTree splits numerical data by density and categorical data by MSE. It can also fit pure decision trees with mean values at leaves. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten splits we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a nice 90% of compute.
+KernelTree splits numerical data by density and categorical data by MSE. It can also fit pure decision trees with mean values at leaves. The idea here is that the kernel bandwidth should largely depend on how dense the data is. For numerical data, KernelTree splits until number of observations is below the 'max_sample' parameter. Besides finding regions which would be well served by the same bandwidth, this has the benefit of speeding up computation significantly in calculating the kernel matrices for the kernel estimator. For example, with ten regions we go from computing a (n, n) matrix to computing ten (n/10, n/10) matrices with n²/10 operations instead of n² (assuming equal splits). This saves a nice 90% of compute.
 
 The actual estimation is handled by KernelEstimator. It optimizes a scalar precision (inverse bandwidth) for the local constant estimator using leave-one-out cross validation and random search between given bounds. It has both Gaussian and (isotropic) Laplace kernels with default being the Laplace kernel. KernelEstimator also has uncertainty quantification methods for quantile and conditional variance prediction (Fan & Yao 1998).
 
@@ -71,14 +71,14 @@ Beyond the core boosting algorithm, a few features worth highlighting:
 
 #### Smart Feature Selection
 
-The default selector (JMISelector) is a probabilistic algorithm based on joint mutual information (Yang & Moody 1999) between features and pseudo-residuals, measuring relevance, redundancy and synergy with the same metric. Purely random selection is available through RandomSelector.
+The default selector (JMISelector) scores candidate features by joint mutual information (JMI; Yang & Moody 1999) between feature pairs and the current pseudo-residuals, which measures relevance, redundancy and synergy with a single metric (Brown et al. 2012). Selection is probabilistic, and blends the JMI score with per-feature gain history and a recency penalty. Purely random selection is available through RandomSelector.
 
 ```python
 from kernelboost.feature_selection import JMISelector
 
 selector = JMISelector(
-    relevance_alpha=0.7,
-    temperature=0.3,
+    relevance_alpha=0.9,
+    temperature=0.2,
 )
 
 booster = KernelBooster(
@@ -89,7 +89,7 @@ booster = KernelBooster(
 
 #### Early Stopping
 
-Training stops automatically if evaluation loss doesn't improve for consecutive rounds (controlled by n_iter_no_change parameter).
+Training stops automatically if evaluation loss doesn't improve for `n_iter_no_change` consecutive rounds.
 
 ```python
 booster.fit(X_train, y_train, eval_set=(X_val, y_val))
@@ -123,7 +123,7 @@ lower, upper = booster.predict_intervals(X, alpha=0.1, eval_set=(X_val, y_val))
 variance = booster.predict_variance(X)
 ```
 
-All methods fit dedicated trees on model residuals. Quantile trees are fit on eval_set residuals: fitting them on training residuals collapses to unconditional quantiles, as boosting leaves no conditional mean signal in the residuals. Variance trees fit on training data are corrected with leave-one-out residuals by default (overfit_correction argument). See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
+Both methods fit dedicated trees on model residuals. Quantile trees are fit on eval_set residuals: fitting them on training residuals collapses to unconditional quantiles, as boosting leaves little conditional mean signal in the residuals. Variance trees fit on training data are corrected with leave-one-out residuals by default (overfit_correction argument). The correction removes own-observation effect, but estimation bias at the booster stage is still present, which is why the variance estimate tends to overestimate the true variance. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
 
 #### Data Preprocessing
 
@@ -145,6 +145,8 @@ Like other kernel methods, kernelboost works best with continuous, smooth featur
 |-------|---------|
 | `KernelBooster` | Main booster for regression/binary classification |
 | `MulticlassBooster` | One-vs-rest multiclass wrapper |
+| `KernelTree` | Data partitioning with kernel estimators at leaves |
+| `KernelEstimator` | Nadaraya-Watson local constant estimator |
 | `MSEObjective` | Mean squared error (regression) |
 | `EntropyObjective` | Cross-entropy (binary classification) |
 | `QuantileObjective` | Pinball loss (quantile regression) |
@@ -152,6 +154,13 @@ Like other kernel methods, kernelboost works best with continuous, smooth featur
 | `RandomSelector` | Random feature selection |
 | `RhoOptimizer` | Post-hoc step size optimization |
 | `RankTransformer` | Rank-based feature scaling |
+
+Besides `fit`, `predict`, `predict_proba` and `score`, `KernelBooster` exposes `staged_predict` and `staged_predict_proba`, which yield predictions after every boosting round. Unlike `predict`, these sweep all fitted rounds by default, so they can be used to inspect the learning curve past the early-stopping cutoff.
+
+```python
+for round_idx, preds in enumerate(booster.staged_predict(X_test)):
+    print(round_idx, mean_squared_error(y_test, preds))
+```
 
 ## Main Parameters
 
@@ -184,8 +193,9 @@ Like other kernel methods, kernelboost works best with continuous, smooth featur
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `kernel_type` | 'laplace' | Kernel function: 'laplace' or 'gaussian' |
-| `precision_method` | 'pilot-cv' | Bandwidth optimization: 'pilot-cv', 'search', or 'silverman' |
-| `search_rounds` | 20 | Precision optimization iterations |
+| `precision_method` | 'pilot-cv' | Bandwidth optimization: 'pilot-cv' (pilot bounds, then LOO-CV), 'pilot-aicc' (pilot bounds, then AICc), 'search' (LOO-CV over `bounds`), or 'silverman' (rule of thumb, no CV) |
+| `pilot_factor` | 3.0 | Width of the pilot search range: `[p/factor, p*factor]` around the pilot precision (pilot methods only) |
+| `search_rounds` | 10 | Precision optimization iterations |
 | `bounds` | (0.1, 35.0) | Precision search bounds |
 
 ## Benchmarks
@@ -193,23 +203,29 @@ Like other kernel methods, kernelboost works best with continuous, smooth featur
 Results have inherent randomness due to feature selection and subsampling. Scripts available in `benchmarks/`.
 
 ### Regression (California Housing)
+
+*kernelboost on GPU, n_train=16000, n_estimators=200.*
+
 ```text
 =================================================================
 Model                       MSE        MAE         R²       Time
 -----------------------------------------------------------------
-kernelboost              0.1790     0.2781     0.8651      12.9s
-sklearn HGBR             0.2103     0.3018     0.8415       0.2s
+kernelboost              0.1807     0.2769     0.8638      12.0s
+sklearn HGBR             0.2061     0.3000     0.8446       0.3s
 XGBoost                  0.2080     0.2962     0.8432       0.1s
 LightGBM                 0.1972     0.2894     0.8513       0.1s
 =================================================================
 ```
 
 ### Binary Classification (Breast Cancer)
+
+*kernelboost on GPU, n_train=455 (80/20 split), n_estimators=100.*
+
 ```text
 =================================================================
 Model                  Accuracy    AUC-ROC         F1       Time
 -----------------------------------------------------------------
-kernelboost              0.9825     0.9984     0.9861       2.1s
+kernelboost              0.9737     0.9987     0.9790       1.6s
 sklearn HGBC             0.9649     0.9948     0.9722       0.1s
 XGBoost                  0.9561     0.9941     0.9650       0.0s
 LightGBM                 0.9737     0.9921     0.9790       0.0s
@@ -223,10 +239,10 @@ Kernel Methods Benchmark (n_train=10000)
 =================================================================
 Model                       MSE        MAE         R²       Time
 -----------------------------------------------------------------
-kernelboost              0.2027     0.2936     0.8456       4.7s
-KernelRidge              0.4258     0.4828     0.6756       1.5s
-SVR                      0.3133     0.3766     0.7613       3.3s
-GP (n=5000)              0.3300     0.4038     0.7485      29.8s
+kernelboost              0.2013     0.2952     0.8479      11.4s
+KernelRidge              0.4257     0.4790     0.6783       1.5s
+SVR                      0.3103     0.3716     0.7654       3.2s
+GP (n=5000)              0.3338     0.4034     0.7477      27.3s
 =================================================================
 ```
 
@@ -239,8 +255,8 @@ Uncertainty Quantification (90% intervals, alpha=0.1)
 =================================================================
 Model                  Coverage    Width   Var Corr   Var Ratio
 -----------------------------------------------------------------
-kernelboost              91.4%    1.379      0.228       1.166
-GP (n=5000)              91.0%    1.832      0.156       1.062
+kernelboost              90.4%    1.351      0.256       0.897
+GP (n=5000)              90.6%    1.823      0.169       1.085
 =================================================================
 ```
 
@@ -255,22 +271,25 @@ GPU vs CPU Training Time (California Housing, n=10000)
 =================================================================
 Backend                                                  Time
 -----------------------------------------------------------------
-CPU (C/OpenMP)                                          48.2s
-GPU (CuPy/CUDA)                                          7.3s
+CPU (C/OpenMP)                                          56.7s
+GPU (CuPy/CUDA)                                          8.6s
 =================================================================
-GPU speedup: 6.7x
+GPU speedup: 6.6x
 ```
 
 All benchmarks run on Ubuntu 22.04 with Ryzen 7700 and RTX 3090.
 
 ## References
 
+- Brown, G., Pocock, A., Zhao, M.-J., & Luján, M. (2012). Conditional Likelihood Maximisation: A Unifying Framework for Information Theoretic Feature Selection. Journal of Machine Learning Research, 13, 27-66.
 - Fan, J., & Gijbels, I. (1996). *Local Polynomial Modelling and Its Applications*. Chapman & Hall.
 - Fan, J., & Yao, Q. (1998). Efficient estimation of conditional variance functions in stochastic regression. Biometrika, 85(3), 645–660.
 - Friedman, J. H. (2001). *Greedy Function Approximation: A Gradient Boosting Machine*. Annals of Statistics, 29(5), 1189-1232.
+- Hall, P., Wolff, R. C. L., & Yao, Q. (1999). Methods for Estimating a Conditional Distribution Function. Journal of the American Statistical Association, 94(445), 154-163.
 - Hansen, B. E. (2004). Nonparametric Conditional Density Estimation. Working paper, University of Wisconsin.
 - Nadaraya, E. A. (1964). On Estimating Regression. Theory of Probability and Its Applications, 9(1), 141-142.
 - Watson, G. S. (1964). Smooth Regression Analysis. Sankhyā: The Indian Journal of Statistics, Series A, 26(4), 359-372.
+- Yang, H. H., & Moody, J. (1999). Data Visualization and Feature Selection: New Algorithms for Nongaussian Data. Advances in Neural Information Processing Systems 12 (NIPS), 687-693.
 
 ## About
 

@@ -63,7 +63,7 @@ if __name__ == "__main__":
         max_sample=350,
         min_sample=80,
         n_estimators=100,
-        subsample_share=0.85,
+        subsample_share=1.0,
         min_features=1,
         max_features=5,
         overlap_epsilon=0.1,

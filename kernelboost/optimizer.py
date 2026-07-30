@@ -25,13 +25,14 @@ def uniform_search(
         rng=None,
         mean_y: float = 0.0,
         ) -> Tuple[np.ndarray, float]:
-    """Perform random search using uniform distribution across bounds."""
+    """Perform random search using log-uniform distribution across bounds."""
     _validate_search_params(rounds, bounds)
     rng = rng or np.random.default_rng()
+    log_lower, log_upper = np.log(bounds[0]), np.log(bounds[1])
     best, best_eval = initial_precision, float(evaluate(func, t_dependent, t_features, initial_precision, mean_y))
 
     for k in range(rounds):
-        candidate = np.array([rng.uniform(bounds[0], bounds[1])])
+        candidate = np.exp(np.array([rng.uniform(log_lower, log_upper)]))
         evaluation = evaluate(func, t_dependent, t_features, candidate, mean_y)
 
         if evaluation < best_eval:
@@ -52,22 +53,44 @@ def normal_search(
         rng=None,
         mean_y: float = 0.0,
         ) -> Tuple[np.ndarray, float]:
-    """Perform random search around current best using normal distribution."""
+    """Perform random search around current best using log-normal distribution."""
     _validate_search_params(rounds, bounds)
     rng = rng or np.random.default_rng()
-    half_range = (bounds[1] - bounds[0]) / 2
-    center = bounds[0] + half_range
+    log_lower, log_upper = np.log(bounds[0]), np.log(bounds[1])
+    sigma = (log_upper - log_lower) / 2
     best, best_eval = initial_precision, float(evaluate(func, t_dependent, t_features, initial_precision, mean_y))
 
     for k in range(rounds):
-        mean_shift = (center - best) * 0.3
         while True:
-            candidate = np.clip(
-                np.atleast_1d(best) + mean_shift + rng.normal(0, half_range),
-                bounds[0], bounds[1]
-            )
-            if not np.array_equal(candidate, best):
+            log_candidate = np.log(float(best)) + rng.normal(0, sigma)
+            if log_lower <= log_candidate <= log_upper:
                 break
+        candidate = np.atleast_1d(np.exp(log_candidate))
+        evaluation = evaluate(func, t_dependent, t_features, candidate, mean_y)
+
+        if evaluation < best_eval:
+            best = candidate.copy()
+            best_eval = evaluation
+
+    return best, best_eval
+
+
+def grid_search(
+        func: Callable,
+        evaluate: Callable,
+        t_dependent: np.ndarray,
+        t_features: np.ndarray,
+        rounds: int,
+        initial_precision: np.ndarray,
+        bounds: tuple = (0.10, 35.0),
+        mean_y: float = 0.0,
+        ) -> Tuple[np.ndarray, float]:
+    """Perform deterministic search using a log-spaced grid across bounds."""
+    _validate_search_params(rounds, bounds)
+    best, best_eval = initial_precision, float(evaluate(func, t_dependent, t_features, initial_precision, mean_y))
+
+    for precision in np.geomspace(bounds[0], bounds[1], rounds):
+        candidate = np.atleast_1d(precision)
         evaluation = evaluate(func, t_dependent, t_features, candidate, mean_y)
 
         if evaluation < best_eval:
@@ -110,11 +133,12 @@ def optimize_precision(
             bounds,
             optimization_parameters["pilot_factor"],
         )
+        initial_precision = np.sqrt(bounds[1] * bounds[0])       
 
     evaluate = aicc_evaluation if method == "pilot-aicc" else loo_evaluation
 
     if initial_precision == 0:
-        init_val = np.atleast_1d((bounds[1] - bounds[0]) / 2)
+        init_val = np.atleast_1d(np.mean(bounds))
         best, _ = uniform_search(
             func,
             evaluate,
@@ -140,33 +164,6 @@ def optimize_precision(
         )
 
     return best
-
-
-def grid_search(
-        func: Callable,
-        initial_values: np.ndarray,
-        start: float,
-        stop: float,
-        step: float,
-        **kwargs,
-        ) -> Tuple[np.ndarray, float]:
-    """Perform grid search by scaling initial values."""
-    scale = start
-    best = np.array(initial_values).copy()
-    best_eval = func(best, **kwargs)
-
-    while scale < stop:
-        scale += step
-        for index in range(len(initial_values)):
-            current = best.copy()
-            current[index] = initial_values[index] * scale
-            evaluation = func(current, **kwargs)
-
-            if evaluation < best_eval:
-                best_eval = evaluation
-                best = current.copy()
-
-    return best, best_eval
 
 
 def estimate_bounds(
@@ -263,5 +260,5 @@ def silverman_precision(t_features: np.ndarray, scale: float = 10.0) -> np.ndarr
         t_features = t_features.get()
     n, d = t_features.shape
     sigma = np.mean(np.std(t_features, axis=0))
-    h = scale * sigma * np.power(n, -1.0 / (d + 4))
-    return np.atleast_1d(h)
+    h = max(scale * sigma * np.power(n, -1.0 / (d + 4)), 1e-5)
+    return np.atleast_1d(1.0 / h)
