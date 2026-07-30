@@ -337,6 +337,10 @@ class KernelBooster:
             self._train_single_round(m)
             self._log_round(m, self.feature_constructors_[-1])
 
+            # score every round, including the last, before deciding to stop
+            if self._eval_X is not None:
+                self._update_validation_tracking(m + 1)
+
             if self._should_stop(m + 1):
                 break
 
@@ -514,7 +518,7 @@ class KernelBooster:
 
         # validation-based
         if self._eval_X is not None:
-            if self._check_validation_stopping(m):
+            if self._rounds_no_improvement >= self.n_iter_no_change:
                 if self.verbose > 0:
                     print(
                         f"Early stopping: validation loss did not improve for {self.n_iter_no_change} rounds."
@@ -532,7 +536,7 @@ class KernelBooster:
 
         return False
 
-    def _check_validation_stopping(self, m: int) -> bool:
+    def _update_validation_tracking(self, m: int) -> None:
         """Update validation score tracking after a round."""
         # materialize validation features for the current round's constructor
         val_features = self.feature_constructors_[-1].transform(self._eval_X)
@@ -553,10 +557,8 @@ class KernelBooster:
 
         if self.verbose > 0:
             print(
-                f"Validation loss: {val_loss:.5f} (best: {self._best_val_loss:.5f} at round {self._best_round + 1})"
+                f"Validation loss: {val_loss:.5f} (best: {self._best_val_loss:.5f} at round {self._best_round})"
             )
-
-        return self._rounds_no_improvement >= self.n_iter_no_change
 
     def _check_rho_stopping(self, m: int) -> bool:
         """Check if training should stop based on rho heuristic."""
