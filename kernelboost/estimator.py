@@ -231,7 +231,7 @@ class KernelEstimator:
     def loo_residuals(self) -> np.ndarray:
         """Exact LOO training residuals: (y - m_hat)/(1 - S_ii) = y - m_hat^{-i}."""
         s = self.self_weights()  # fitted-check happens here
-        resid = self.y_.ravel() - self.training_predictions_.ravel()
+        resid = self.y_.ravel() - self.predict(self.X_).ravel()
         return resid / (1.0 - s)
 
     def _kernel_quantiles(

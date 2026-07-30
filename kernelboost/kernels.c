@@ -113,13 +113,13 @@ float loo_mse(
         }
 
         // self-weight = exp(0) = 1.0, normalized = 1/weight_sum
-        float self_weight_norm = (weight_sum > 0) ? 1.0f / weight_sum : 1.0f;
+        float self_weight_norm = 1.0f / weight_sum;
 
         float in_residual = dependent_sum / weight_sum - training_dependent[i];
         rss_sum += in_residual * in_residual;
         effective_sample += self_weight_norm;
 
-        if (weight_sum > 0 && self_weight_norm <= 1.0f - 1e-2f) {
+        if (self_weight_norm <= 1.0f - 1e-2f) {
             // normal LOO calculation
             float prediction = dependent_sum / weight_sum;
             float scaled_error = (prediction - training_dependent[i])

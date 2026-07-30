@@ -239,6 +239,9 @@ class EntropyObjective(Objective):
         cov = np.dot(h * g, z) / n  
         var = np.dot(h * z, z) / n
 
+        if var == 0.0:
+            return 0.0
+
         raw_rho = cov / var
 
         if abs(raw_rho) > lambda1:

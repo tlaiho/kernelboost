@@ -220,10 +220,6 @@ class KernelBooster:
             raise ValueError(
                 f"X and y have different number of samples: {X.shape[0]} vs {y.ravel().shape[0]}"
             )
-        if X.shape[0] < self.min_sample:
-            raise ValueError(
-                f"Not enough samples ({X.shape[0]}) for min_sample ({self.min_sample})"
-            )
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
             raise ValueError("X contains NaN or infinite values")
         if np.any(np.isnan(y)) or np.any(np.isinf(y)):
@@ -274,7 +270,13 @@ class KernelBooster:
         """
         self._validate_data(X, y)
 
-        if self.min_features > self.n_features_in_:
+        # kernel-leaf constraint: applies to training data only, not to eval_set
+        if X.shape[0] < self.min_sample:
+            raise ValueError(
+                f"Not enough samples ({X.shape[0]}) for min_sample ({self.min_sample})"
+            )
+
+        if self.min_features > X.shape[1]:
             raise ValueError(
                 f"min_features ({self.min_features}) exceeds the number of "
                 f"features ({self.n_features_in_})"
@@ -899,7 +901,7 @@ class KernelBooster:
             return np.maximum(np.median(variances, axis=0), 0.0)
 
         if aggregation == "wmean":
-            weights = np.asarray(self.variance_tree_errors_) ** -2
+            weights = np.maximum(self.variance_tree_errors_, 1e-12) ** -2
             weights = weights / weights.sum()
             return np.maximum(weights @ variances, 0.0)
 

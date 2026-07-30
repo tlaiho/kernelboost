@@ -27,27 +27,6 @@ class RhoOptimizer:
         self.learning_rate_ = None
         self._Z_train = None
 
-    def _base_prediction(self) -> float:
-        """Return the base prediction (logit for classifiers, mean for regression)."""
-        return self.booster_.f_init_.item()
-
-    def _build_design_matrix(self, X: np.ndarray) -> np.ndarray:
-        """Build design matrix Z where column i contains tree i's predictions."""
-        # Use cached predictions if this is training data
-        if X is self.booster_.X_:
-            return np.column_stack(self.booster_.tree_predictions_)
-
-        n_samples = X.shape[0]
-        n_trees = len(self.booster_.trees_)
-        Z = np.zeros((n_samples, n_trees))
-
-        for i in range(n_trees):
-            constructor = self.booster_.feature_constructors_[i]
-            tree_features = constructor.transform(X)
-            Z[:, i] = self.booster_.trees_[i].predict(tree_features).ravel()
-
-        return Z
-
     def optimize_rhos(
         self,
         Z: np.ndarray,
@@ -127,6 +106,10 @@ class RhoOptimizer:
             current_loss = new_loss
 
         return rho
+
+    def _base_prediction(self) -> float:
+        """Return the base prediction (logit for classifiers, mean for regression)."""
+        return self.booster_.f_init_.item()
  
     def _compute_covariance_variance(
         self,
@@ -161,6 +144,23 @@ class RhoOptimizer:
             pred = pred + rho_vector[i] * tree_pred
 
         return covariances, variances
+
+    def _build_design_matrix(self, X: np.ndarray) -> np.ndarray:
+        """Build design matrix Z where column i contains tree i's predictions."""
+        # Use cached predictions if this is training data
+        if X is self.booster_.X_:
+            return np.column_stack(self.booster_.tree_predictions_)
+
+        n_samples = X.shape[0]
+        n_trees = len(self.booster_.trees_)
+        Z = np.zeros((n_samples, n_trees))
+
+        for i in range(n_trees):
+            constructor = self.booster_.feature_constructors_[i]
+            tree_features = constructor.transform(X)
+            Z[:, i] = self.booster_.trees_[i].predict(tree_features).ravel()
+
+        return Z
 
     def _inverse_line_search(
         self, rho_i: float, cov_i: float, var_i: float, lambda1: float
@@ -203,6 +203,8 @@ class RhoOptimizer:
         covariances, variances = self._compute_covariance_variance(self.rho_)
 
         lambda1 = initial_lambda1
+        # fallback, used if no pass yields a usable learning_rate
+        learning_rate = self.booster_.learning_rate
 
         # outer loop: decrease lambda1
         for _ in range(20):
@@ -222,11 +224,6 @@ class RhoOptimizer:
 
             # reduce lambda1 if no suitable learning_rate found
             lambda1 *= 0.5
-            if lambda1 < 1e-10:
-                # fallbacks:
-                lambda1 = 0.0  
-                learning_rate = 0.1 
-                break
 
         learning_rate = min(1.0, max(0.01, learning_rate))
 
@@ -369,6 +366,10 @@ class RhoOptimizer:
 
         self.booster_.rho_ = list(self.rho_)
 
+        # every tree is re-weighted, so the training-time early-stopping cut no
+        # longer applies; zero weights, if any, drop out of predict()
+        self.booster_.best_round_ = len(self.booster_.trees_)
+
         # rho changes invalidate the cached LOO gap and second-stage trees
         self.booster_.loo_gap_ = None
         self.booster_.variance_trees_ = None
@@ -448,14 +449,13 @@ class RhoOptimizer:
         objective = booster.objective
         n_trees = len(booster.trees_)
 
-        # Initialize predictions using base prediction (logit for classifiers, mean for regression)
+        # initialize predictions using base prediction
         predictions = np.full((n_samples, 1), self._base_prediction())
 
         if use_subsampling:
             sample_size = int(booster.subsample_share * n_samples)
             rng = np.random.default_rng(booster.rseed_)
-            # uniform weights for refit data ! 
-            weights = np.full(n_samples, 1.0 / n_samples)
+            weights = booster.sampling_weights_
         else:
             sample_size = n_samples
             rng = None
@@ -470,15 +470,19 @@ class RhoOptimizer:
             all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
 
             if use_subsampling:
-                training_data = rng.choice(
-                    all_data,
+                idx = rng.choice(
+                    n_samples,
                     size=sample_size,
                     p=weights,
                     replace=False,
                     shuffle=False
                 )
             else:
-                training_data = all_data
+                idx = np.arange(n_samples)
+
+            # recorded so each tree is paired with the rows it saw
+            booster.subsample_indices_[i] = idx
+            training_data = all_data[idx]
 
             booster.trees_[i].fit(training_data[:, 1:], training_data[:, 0])
             booster.tree_predictions_[i] = booster.trees_[i].predict(training_features)
@@ -488,8 +492,13 @@ class RhoOptimizer:
 
         booster.predictions_ = predictions
 
-        # trees have changed: invalidate cached design matrix
+        # clean slate
         self._Z_train = None
+        booster.loo_gap_ = None
+        booster.variance_trees_ = None
+        booster.variance_constructors_ = None
+        booster.quantile_trees_ = None
+        booster.quantile_constructors_ = None
 
         return self
 
