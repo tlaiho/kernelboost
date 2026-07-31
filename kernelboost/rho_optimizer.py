@@ -11,16 +11,19 @@ class RhoOptimizer:
     Args:
     booster : KernelBooster
         A fitted KernelBooster instance.
-    lambda_reg : float, default=1.0
-        Regularization parameter for rho optimization.
+    lambda2 : float, default=0.05
+        Ridge penalty on rho, relative to the average data curvature.
+        lambda2=1 penalises as strongly as the data curves.
     """
 
-    def __init__(self, booster: "KernelBooster", lambda_reg: float = 1.0):
+    def __init__(self, booster: "KernelBooster", lambda2: float = 0.05):
         if not hasattr(booster, 'trees_'):
             raise ValueError("Booster must be fitted before optimization")
 
         self.booster_ = booster
-        self.lambda_reg_ = lambda_reg
+        self.lambda2_ = lambda2
+        # multiplier to rescale lambda2 to tolerate regression's flatter loss surface
+        self.lambda2_multiplier_ = 1.0 if booster.objective.is_classifier else 1e-2
 
         self.rho_ = None
         self.lambda1_ = None
@@ -31,7 +34,7 @@ class RhoOptimizer:
         self,
         Z: np.ndarray,
         y: np.ndarray,
-        lambda_reg: float = None,
+        lambda2: float = None,
         max_iter: int = 100,
         tol: float = 1e-6,
         step_size: float = 0.25
@@ -43,8 +46,9 @@ class RhoOptimizer:
             Design matrix from build_design_matrix().
         y : np.ndarray of shape (n_samples,) or (n_samples, 1)
             Target values.
-        lambda_reg : float, optional
-            Regularization parameter. Uses self.lambda_reg_ if None.
+        lambda2 : float, optional
+            Ridge penalty relative to the average data curvature. Uses
+            self.lambda2_ if None.
         max_iter : int, default=100
             Maximum number of iterations.
         tol : float, default=1e-6
@@ -56,8 +60,8 @@ class RhoOptimizer:
         np.ndarray of shape (M,)
             Optimized rho vector.
         """
-        if lambda_reg is None:
-            lambda_reg = self.lambda_reg_
+        if lambda2 is None:
+            lambda2 = self.lambda2_
 
         y = y.ravel()
         n = len(y)
@@ -67,26 +71,34 @@ class RhoOptimizer:
         base_pred = self._base_prediction()
         rho = np.array(self.booster_.rho_, dtype=np.float64)
 
+        # gradient() and hessian() give derivatives of grad_loss_scale * n * loss()
+        scale = objective.grad_loss_scale
         pred = base_pred + Z @ rho
-        current_loss = objective(y, pred)
+
+        # lambda2 is scaled to the average curvature
+        hessian0 = objective.hessian(y, pred).ravel()
+        penalty = (lambda2 * self.lambda2_multiplier_
+                   * np.sum(hessian0[:, None] * Z**2) / (n * M))
+
+        current_loss = scale * objective(y, pred) + 0.5 * penalty * np.dot(rho, rho)
 
         for _ in range(max_iter):
             # gradient returns pseudo-residuals (negative gradient)
             g = objective.gradient(y, pred).ravel()
-            # hessian returns d²L/dpred²
-            h = objective.hessian(y, pred)
+            # hessian is on the same scale as gradient
+            h = objective.hessian(y, pred).ravel()
 
-            # gradient: ∂L/∂ρ = -Z.T @ g
-            grad_rho = -Z.T @ g + lambda_reg * rho
+            # gradient: ∂L/∂ρ = -Z.T @ g / n
+            grad_rho = -(Z.T @ g) / n + penalty * rho
 
-            # Hessian: H = Z.T @ diag(h) @ Z
-            H = Z.T @ (h[:, None] * Z) + lambda_reg * np.eye(M)
+            # Hessian: H = Z.T @ diag(h) @ Z / n
+            H = (Z.T @ (h[:, None] * Z)) / n + penalty * np.eye(M)
 
             # Newton with damping
             delta = step_size * np.linalg.solve(H, grad_rho)
             rho_new = rho - delta
             pred_new = base_pred + Z @ rho_new
-            new_loss = objective(y, pred_new)
+            new_loss = scale * objective(y, pred_new) + 0.5 * penalty * np.dot(rho_new, rho_new)
 
             # backtracking line search for robustness
             alpha = 1.0
@@ -94,16 +106,18 @@ class RhoOptimizer:
                 alpha *= 0.5
                 rho_new = rho - alpha * delta
                 pred_new = base_pred + Z @ rho_new
-                new_loss = objective(y, pred_new)
+                new_loss = scale * objective(y, pred_new) + 0.5 * penalty * np.dot(rho_new, rho_new)
 
-            if np.max(np.abs(alpha * delta)) < tol:
-                rho = rho_new
-                pred = pred_new
+            # backtracking exhausted without improvement: keep the current rho
+            if new_loss > current_loss:
                 break
 
             rho = rho_new
             pred = pred_new
             current_loss = new_loss
+
+            if np.max(np.abs(alpha * delta)) < tol:
+                break
 
         return rho
 
@@ -239,7 +253,7 @@ class RhoOptimizer:
         lambda_candidates: np.ndarray,
         k: int = 5
     ) -> float:
-        """Select best lambda_reg via k-fold cross-validation.
+        """Select best lambda2 via k-fold cross-validation.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
@@ -247,13 +261,13 @@ class RhoOptimizer:
         y : np.ndarray of shape (n_samples,) or (n_samples, 1)
             Target values.
         lambda_candidates : np.ndarray
-            Array of lambda_reg values to try.
+            Array of lambda2 values to try.
         k : int, default=5
             Number of CV folds.
 
         Returns:
         float
-            Best lambda_reg value.
+            Best lambda2 value.
         """
         y = y.ravel()
         n = len(y)
@@ -270,7 +284,7 @@ class RhoOptimizer:
         best_lambda = lambda_candidates[0]
         best_loss = np.inf
 
-        for lambda_reg in lambda_candidates:
+        for lambda2 in lambda_candidates:
             fold_losses = []
 
             for fold in range(k):
@@ -282,7 +296,7 @@ class RhoOptimizer:
                 Z_train = Z[train_idx]
                 y_train = y[train_idx]
 
-                rho_fold = self.optimize_rhos(Z_train, y_train, lambda_reg=lambda_reg)
+                rho_fold = self.optimize_rhos(Z_train, y_train, lambda2=lambda2)
 
                 Z_val = Z[val_idx]
                 y_val = y[val_idx]
@@ -295,7 +309,7 @@ class RhoOptimizer:
 
             if mean_loss < best_loss:
                 best_loss = mean_loss
-                best_lambda = lambda_reg
+                best_lambda = lambda2
 
         return best_lambda
 
@@ -325,7 +339,7 @@ class RhoOptimizer:
         k: int = 5,
         lambda_candidates: np.ndarray = None
     ) -> "RhoOptimizer":
-        """Fit using k-fold CV to select lambda_reg, then back out lambdas.
+        """Fit using k-fold CV to select lambda2, then back out lambdas.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
@@ -335,20 +349,20 @@ class RhoOptimizer:
         k : int, default=5
             Number of CV folds.
         lambda_candidates : np.ndarray, optional
-            Lambda values to try. Default is logspace(-2, 1, 10).
+            Lambda values to try. Default is logspace(-3, 1, 10).
 
         Returns:
         self : RhoOptimizer
             Fitted optimizer.
         """
         if lambda_candidates is None:
-            lambda_candidates = np.logspace(-2, 1, 10)
+            lambda_candidates = np.logspace(-3, 1, 10)
 
         best_lambda = self.optimize_lambda_cv(X, y, lambda_candidates, k=k)
-        self.lambda_reg_ = best_lambda
+        self.lambda2_ = best_lambda
 
         Z = self._build_design_matrix(X)
-        self.rho_ = self.optimize_rhos(Z, y, lambda_reg=best_lambda)
+        self.rho_ = self.optimize_rhos(Z, y, lambda2=best_lambda)
 
         self.find_hyperparameters()
 

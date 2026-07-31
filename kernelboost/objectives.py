@@ -13,8 +13,9 @@ from .utilities import r2_score, accuracy_score
 
 class Objective(ABC):
     """Abstract base class for gradient boosting objectives."""
-    
+
     is_classifier: bool = False
+    grad_loss_scale: float = 1.0
 
     def __call__(self, y: np.ndarray, predictions: np.ndarray) -> float:
         """Alias for loss()."""
@@ -53,8 +54,12 @@ class Objective(ABC):
         pass
     
     def hessian(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
-        """Diagonal second derivative of loss w.r.t. predictions.
-        Default: 1/n (leads to gradient descent).
+        """Diagonal second derivative of the working objective w.r.t. predictions.
+
+        The working objective is the one whose negative gradient is returned by
+        gradient(), i.e. grad_loss_scale * n * loss(). Default 1.0, the identity 
+        Hessian correct whenever the pseudo-residual is a plain difference and 
+        used as a pseudo-Hessian where the true second derivative vanishes.
 
         Args:
         y : np.ndarray
@@ -67,8 +72,7 @@ class Objective(ABC):
             Hessian diagonal with same shape as y.
         """
         n = len(y)
-        # default is just gradient descent --> no Hessian
-        return np.full(n, 1.0 / n) 
+        return np.ones(n)
 
     @abstractmethod
     def line_search(
@@ -130,15 +134,15 @@ class Objective(ABC):
 class MSEObjective(Objective):
     """Mean Squared Error objective for regression."""
 
+    # gradient() drops the factor of 2, so the working objective is
+    # 0.5 * sum((y - F)^2) and the inherited identity hessian() matches it.
+    grad_loss_scale: float = 0.5
+
     def loss(self, y: np.ndarray, predictions: np.ndarray) -> float:
         return np.mean(np.square(y.ravel() - predictions.ravel()))
 
     def gradient(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
         return y - predictions
-
-    def hessian(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
-        n = len(y)
-        return np.full(n, 2.0 / n)
 
     def score(self, y: np.ndarray, predictions: np.ndarray) -> float:
         """Return R² score."""
@@ -235,8 +239,8 @@ class EntropyObjective(Objective):
         g = gradient.ravel()
         z = current_predictions.ravel()
 
-        # weighted with hessian  
-        cov = np.dot(h * g, z) / n  
+        # Gauss-Newton step:
+        cov = np.dot(g, z) / n
         var = np.dot(h * z, z) / n
 
         if var == 0.0:
@@ -363,8 +367,3 @@ class QuantileObjective(Objective):
     def score(self, y: np.ndarray, predictions: np.ndarray) -> float:
         """Return negative pinball loss."""
         return -self.loss(y, predictions)
-
-    def hessian(self, y: np.ndarray, predictions: np.ndarray) -> np.ndarray:
-        """Pseudo-Hessian for quantile loss (true Hessian is zero)."""
-        n = len(y)
-        return np.full(n, 1.0 / n)
