@@ -25,7 +25,7 @@ except OSError:
     raise OSError(
         f"Could not load C library at {libname}. "
         f"Compile it with: gcc -shared -o {libname} -fPIC kernelboost/kernels.c "
-        f"-lm -fopenmp -O3 -march=native -ffast-math -funroll-loops -flto"
+        f"-lm -fopenmp -O3 -funroll-loops -flto"
     )
 clib.predict.restype = None
 clib.predict.argtypes = (
