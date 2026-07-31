@@ -2,7 +2,7 @@
 
 **Gradient boosting with kernel-based local constant estimators**
 
-![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
+![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![NumPy](https://img.shields.io/badge/NumPy-array%20backend-blue)
 ![C](https://img.shields.io/badge/C-language-blue)
 ![GPU](https://img.shields.io/badge/GPU-CUDA%20C%2FCuPy-orange)
