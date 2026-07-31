@@ -12,7 +12,8 @@ class RhoOptimizer:
     booster : KernelBooster
         A fitted KernelBooster instance.
     lambda2 : float, default=0.05
-        Ridge penalty on rho, relative to the average data curvature.
+        L2 penalty on deviations from training rhos,
+        relative to the average data curvature.
         lambda2=1 penalises as strongly as the data curves.
     """
 
@@ -30,6 +31,9 @@ class RhoOptimizer:
         self.learning_rate_ = None
         self._Z_train = None
 
+        # L2 anchor: the model as it stands at construction
+        self._rho0 = np.array(booster.rho_, dtype=np.float64)
+
     def optimize_rhos(
         self,
         Z: np.ndarray,
@@ -39,7 +43,8 @@ class RhoOptimizer:
         tol: float = 1e-6,
         step_size: float = 0.25
     ) -> np.ndarray:
-        """Optimize rho weights using Newton-Raphson method.
+        """Optimize rho weights using Newton-Raphson method 
+        with L2 penalty.
 
         Args:
         Z : np.ndarray of shape (n_samples, M)
@@ -47,8 +52,8 @@ class RhoOptimizer:
         y : np.ndarray of shape (n_samples,) or (n_samples, 1)
             Target values.
         lambda2 : float, optional
-            Ridge penalty relative to the average data curvature. Uses
-            self.lambda2_ if None.
+            L2 penalty on rho deviations relative to the 
+            average data curvature. Uses self.lambda2_ if None.
         max_iter : int, default=100
             Maximum number of iterations.
         tol : float, default=1e-6
@@ -71,16 +76,23 @@ class RhoOptimizer:
         base_pred = self._base_prediction()
         rho = np.array(self.booster_.rho_, dtype=np.float64)
 
+        rho0 = self._rho0
+
+        if np.isinf(lambda2):
+            return rho0.copy()
+
+        pred = base_pred + Z @ rho
+
         # gradient() and hessian() give derivatives of grad_loss_scale * n * loss()
         scale = objective.grad_loss_scale
-        pred = base_pred + Z @ rho
 
         # lambda2 is scaled to the average curvature
         hessian0 = objective.hessian(y, pred).ravel()
         penalty = (lambda2 * self.lambda2_multiplier_
                    * np.sum(hessian0[:, None] * Z**2) / (n * M))
 
-        current_loss = scale * objective(y, pred) + 0.5 * penalty * np.dot(rho, rho)
+        d = rho - rho0
+        current_loss = scale * objective(y, pred) + 0.5 * penalty * np.dot(d, d)
 
         for _ in range(max_iter):
             # gradient returns pseudo-residuals (negative gradient)
@@ -89,7 +101,7 @@ class RhoOptimizer:
             h = objective.hessian(y, pred).ravel()
 
             # gradient: ∂L/∂ρ = -Z.T @ g / n
-            grad_rho = -(Z.T @ g) / n + penalty * rho
+            grad_rho = -(Z.T @ g) / n + penalty * (rho - rho0)
 
             # Hessian: H = Z.T @ diag(h) @ Z / n
             H = (Z.T @ (h[:, None] * Z)) / n + penalty * np.eye(M)
@@ -98,7 +110,8 @@ class RhoOptimizer:
             delta = step_size * np.linalg.solve(H, grad_rho)
             rho_new = rho - delta
             pred_new = base_pred + Z @ rho_new
-            new_loss = scale * objective(y, pred_new) + 0.5 * penalty * np.dot(rho_new, rho_new)
+            d = rho_new - rho0
+            new_loss = scale * objective(y, pred_new) + 0.5 * penalty * np.dot(d, d)
 
             # backtracking line search for robustness
             alpha = 1.0
@@ -106,9 +119,9 @@ class RhoOptimizer:
                 alpha *= 0.5
                 rho_new = rho - alpha * delta
                 pred_new = base_pred + Z @ rho_new
-                new_loss = scale * objective(y, pred_new) + 0.5 * penalty * np.dot(rho_new, rho_new)
+                d = rho_new - rho0
+                new_loss = scale * objective(y, pred_new) + 0.5 * penalty * np.dot(d, d)
 
-            # backtracking exhausted without improvement: keep the current rho
             if new_loss > current_loss:
                 break
 
@@ -161,7 +174,7 @@ class RhoOptimizer:
 
     def _build_design_matrix(self, X: np.ndarray) -> np.ndarray:
         """Build design matrix Z where column i contains tree i's predictions."""
-        # Use cached predictions if this is training data
+        # use cached predictions if this is training data
         if X is self.booster_.X_:
             return np.column_stack(self.booster_.tree_predictions_)
 
@@ -267,7 +280,8 @@ class RhoOptimizer:
 
         Returns:
         float
-            Best lambda2 value.
+            Best lambda2 value. np.inf means keeping the training rhos
+            (fit_rho_) beat every candidate on the CV folds.
         """
         y = y.ravel()
         n = len(y)
@@ -349,14 +363,15 @@ class RhoOptimizer:
         k : int, default=5
             Number of CV folds.
         lambda_candidates : np.ndarray, optional
-            Lambda values to try. Default is logspace(-3, 1, 10).
+            Lambda values to try. Default is logspace(-3, 2, 11) plus np.inf
+            (keep the training rhos).
 
         Returns:
         self : RhoOptimizer
             Fitted optimizer.
         """
         if lambda_candidates is None:
-            lambda_candidates = np.logspace(-3, 1, 10)
+            lambda_candidates = np.append(np.logspace(-3, 2, 11), np.inf)
 
         best_lambda = self.optimize_lambda_cv(X, y, lambda_candidates, k=k)
         self.lambda2_ = best_lambda
@@ -379,10 +394,6 @@ class RhoOptimizer:
             raise ValueError("Must call fit() before update_booster()")
 
         self.booster_.rho_ = list(self.rho_)
-
-        # every tree is re-weighted, so the training-time early-stopping cut no
-        # longer applies; zero weights, if any, drop out of predict()
-        self.booster_.best_round_ = len(self.booster_.trees_)
 
         # rho changes invalidate the cached LOO gap and second-stage trees
         self.booster_.loo_gap_ = None
@@ -416,140 +427,3 @@ class RhoOptimizer:
         base_pred = self._base_prediction()
 
         return base_pred + Z @ self.rho_
-
-    def refit_trees(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        use_subsampling: bool = True
-    ) -> "RhoOptimizer":
-        """Re-fit trees using optimized rhos for pseudoresidual computation.
-        Fixes the mismatch between optimized rhos and the original pseudo-
-        residuals.
-
-        Args:
-        X : np.ndarray of shape (n_samples, n_features)
-            Training features (typically the same data used to train the booster).
-        y : np.ndarray of shape (n_samples,) or (n_samples, 1)
-            Training targets.
-        use_subsampling : bool, default=True
-            Whether to use subsampling during tree refitting (matches original
-            training behavior).
-
-        Returns:
-        self : RhoOptimizer
-            Updated optimizer with refitted trees.
-        """
-
-        if self.rho_ is None:
-            raise ValueError("Must call fit() before refit_trees()")
-
-        booster = self.booster_
-        n_samples = X.shape[0]
-        n_features = X.shape[1]
-
-        if n_features != booster.n_features_in_:
-            raise ValueError(
-                f"X has {n_features} features, but booster was trained with "
-                f"{booster.n_features_in_} features"
-            )
-
-        y = y.reshape(-1, 1)
-        if y.shape[0] != n_samples:
-            raise ValueError(
-                f"X has {n_samples} samples but y has {y.shape[0]} samples"
-            )
-
-        objective = booster.objective
-        n_trees = len(booster.trees_)
-
-        # initialize predictions using base prediction
-        predictions = np.full((n_samples, 1), self._base_prediction())
-
-        if use_subsampling:
-            sample_size = int(booster.subsample_share * n_samples)
-            rng = np.random.default_rng(booster.rseed_)
-            weights = booster.sampling_weights_
-        else:
-            sample_size = n_samples
-            rng = None
-            weights = None
-
-        # refit each tree
-        for i in range(n_trees):
-            pseudoresiduals = objective.gradient(y, predictions)
-            constructor = booster.feature_constructors_[i]
-            training_features = constructor.transform(X)
-
-            all_data = np.concatenate((pseudoresiduals, training_features), axis=1)
-
-            if use_subsampling:
-                idx = rng.choice(
-                    n_samples,
-                    size=sample_size,
-                    p=weights,
-                    replace=False,
-                    shuffle=False
-                )
-            else:
-                idx = np.arange(n_samples)
-
-            # recorded so each tree is paired with the rows it saw
-            booster.subsample_indices_[i] = idx
-            training_data = all_data[idx]
-
-            booster.trees_[i].fit(training_data[:, 1:], training_data[:, 0])
-            booster.tree_predictions_[i] = booster.trees_[i].predict(training_features)
-
-            if self.rho_[i] != 0:
-                predictions += self.rho_[i] * booster.tree_predictions_[i]
-
-        booster.predictions_ = predictions
-
-        # clean slate
-        self._Z_train = None
-        booster.loo_gap_ = None
-        booster.variance_trees_ = None
-        booster.variance_constructors_ = None
-        booster.quantile_trees_ = None
-        booster.quantile_constructors_ = None
-
-        return self
-
-    def fit_with_refit(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-        k: int = 3,
-        use_subsampling: bool = True
-    ) -> "RhoOptimizer":
-        """Fit with iterative tree refitting.
-
-        Args:
-        X_train : np.ndarray of shape (n_train, n_features)
-            Training features for tree refitting.
-        y_train : np.ndarray of shape (n_train,) or (n_train, 1)
-            Training targets.
-        X_val : np.ndarray of shape (n_val, n_features)
-            Validation features for rho optimization.
-        y_val : np.ndarray of shape (n_val,) or (n_val, 1)
-            Validation targets.
-        k : int, default=3
-            Number of refit iterations.
-        use_subsampling : bool, default=True
-            Whether to use subsampling during tree refitting.
-
-        Returns:
-        self : RhoOptimizer
-            Fitted optimizer.
-        """
-        for _ in range(k):
-            self.fit(X_val, y_val)
-            self.refit_trees(X_train, y_train, use_subsampling=use_subsampling)
-        
-        # final rhos
-        self.fit(X_val, y_val)
-
-        return self

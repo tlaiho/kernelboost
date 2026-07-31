@@ -352,14 +352,15 @@ class KernelBooster:
             if self._should_stop(m + 1):
                 break
 
-        # set best_round_ (only meaningful when eval_set was provided)
-        if self._eval_X is not None:
-            self.best_round_ = self._best_round
-        else:
-            self.best_round_ = None
-
-        # stored because RhoOptimizer may overwrite rho_
+        # stored because RhoOptimizer may overwrite rho_; keeps the full
+        # training path, including rounds cut by early stopping below
         self.fit_rho_ = tuple(self.rho_)
+
+        # early-stopping cut: rounds after the best validation round drop
+        # out of the model through zero weight
+        if self._eval_X is not None:
+            for t in range(self._best_round, len(self.rho_)):
+                self.rho_[t] = 0.0
 
         if self.verbose > 0:
             print("Finished training.")
@@ -594,11 +595,10 @@ class KernelBooster:
 
         n = X.shape[0]
         predictions = np.zeros(n)
-        n_trees = self.best_round_ if self.best_round_ is not None else len(self.trees_)
 
-        for i in range(n_trees):
-            prediction_features = self.feature_constructors_[i].transform(X)
+        for i in range(len(self.trees_)):
             if self.rho_[i] != 0:
+                prediction_features = self.feature_constructors_[i].transform(X)
                 predictions += (
                     self.rho_[i] * self.trees_[i].predict(prediction_features).ravel()
                 )
@@ -637,9 +637,6 @@ class KernelBooster:
     def staged_predict(self, X: np.ndarray, max_rounds: int = None):
         """
         Yield predictions after each boosting round.
-
-        Note the default differs from predict(): this sweeps ALL rounds, since
-        the point is usually to see past the early-stopping cutoff.
 
         Args:
         X : np.ndarray of shape (n_samples, n_features)
@@ -992,9 +989,8 @@ class KernelBooster:
 
         gap = self.objective.loo_init_gap(self.y_.ravel(), self.y_mean_)
         preds = np.full((self.n_samples_, 1), self.f_init_, dtype=np.float32)
-        n_rounds = self.best_round_ if self.best_round_ is not None else len(self.trees_)
 
-        for t in range(n_rounds):
+        for t in range(len(self.trees_)):
             if self.rho_[t] != 0:
                 r_t = self.objective.gradient(self.y_, preds).ravel()
                 idx = self.subsample_indices_[t]
@@ -1009,15 +1005,8 @@ class KernelBooster:
         return self.loo_gap_
 
     def _last_n_active_tree_indices(self, n: int) -> list[int]:
-        """Find indices of last n trees with non-zero rho."""
-        n_trees = self.best_round_ if self.best_round_ is not None else len(self.trees_)
-        indices = []
-        for i in range(n_trees - 1, -1, -1):
-            if self.rho_[i] != 0:
-                indices.append(i)
-                if len(indices) >= n:
-                    break
-        return indices
+        """Indices of the last n trees with non-zero rho, ascending."""
+        return np.nonzero(self.rho_)[0][-n:].tolist()
 
     def score(self, X: np.ndarray, y: np.ndarray) -> float:
         """Return default score for the objective."""
