@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - LOO variance and LOO quantile computation bugs.
+- Rho-optimizer bug relating `optimize_rhos()` fixed: the Gauss-Newton now takes the L2 regularization correctly into account.
 - Self-weight and LOO-CV guards tightened in bandwidth search.
 - Tree density split recursion bug.
 - Booster seeding.

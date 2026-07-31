@@ -96,7 +96,7 @@ if __name__ == "__main__":
         feature_selector=selector,
         max_sample=3750,
         min_sample=700,
-        n_estimators=200,
+        n_estimators=150,
         subsample_share=0.8,
         learning_rate=0.5,
         min_features=1,

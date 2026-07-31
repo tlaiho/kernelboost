@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdint.h>
 #include <omp.h>
 
 // C code for CPU kernel operations (float32 for consistency with GPU)
@@ -53,9 +54,11 @@ void predict(
     }
 }
 
-// index macro: for i <= j, maps to linear index in upper triangle storage
+// index helper: for i <= j, maps to linear index in upper triangle storage
 // i*n - i*(i-1)/2 + (j - i) = full_rows - subtract_lower_triangle + offset_current_row
-#define TRI_IDX(i, j, n) ((i) * (n) - ((i) * ((i) - 1)) / 2 + ((j) - (i)))
+static inline int64_t tri_idx(int64_t i, int64_t j, int64_t n) {
+    return i * n - i * (i - 1) / 2 + (j - i);
+}
 
 float loo_mse(
     float * out_stats, 
@@ -91,7 +94,7 @@ float loo_mse(
             if (kernel_type == 0) w = gaussian_weight(sq_diff, precision);
             else w = laplace_weight(sq_diff, precision);
 
-            upper[TRI_IDX(i, j, n)] = w;
+            upper[tri_idx(i, j, n)] = w;
         }
     }
 
@@ -106,8 +109,8 @@ float loo_mse(
 
         for (int j = 0; j < n; j++) {
             // symmetry: K(i,j) stored at min(i,j), max(i,j)
-            float w = (i <= j) ? upper[TRI_IDX(i, j, n)] // i is min, j is max
-                               : upper[TRI_IDX(j, i, n)]; // j is min, i is max
+            float w = (i <= j) ? upper[tri_idx(i, j, n)] // i is min, j is max
+                               : upper[tri_idx(j, i, n)]; // j is min, i is max
             weight_sum += w;
             dependent_sum += w * training_dependent[j];
         }

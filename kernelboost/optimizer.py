@@ -108,13 +108,15 @@ def optimize_precision(
         rng=None,
         mean_y: float = 0.0,
         ) -> np.ndarray:
-    """Orchestrate precision optimization.
+    """Orchestrate precision optimization. 
 
     Supports:
-        - "search": LOO-CV with random search with given bounds (default)
-        - "pilot-cv": pilot-estimated bounds, then LOO-CV random search
-        - "pilot-aicc": pilot-estimated bounds, then AICc random search
+        - "search": LOO-CV with grid search over the given bounds (default)
+        - "pilot-cv": pilot-estimated bounds, then LOO-CV grid search
+        - "pilot-aicc": pilot-estimated bounds, then AICc grid search
         - "silverman": Silverman's rule-of-thumb (fast, no CV)
+    
+    `rng` is retained for API compatibility but is unused.
     """
     method = optimization_parameters.get("precision_method", "search")
 
@@ -137,31 +139,19 @@ def optimize_precision(
 
     evaluate = aicc_evaluation if method == "pilot-aicc" else loo_evaluation
 
-    if initial_precision == 0:
-        init_val = np.atleast_1d(np.mean(bounds))
-        best, _ = uniform_search(
-            func,
-            evaluate,
-            t_dependent,
-            t_features,
-            search_rounds * 2,
-            initial_precision=init_val,
-            bounds=bounds,
-            rng=rng,
-            mean_y=mean_y,
-        )
-    else:
-        best, _ = normal_search(
-            func,
-            evaluate,
-            t_dependent,
-            t_features,
-            search_rounds,
-            initial_precision=np.atleast_1d(initial_precision),
-            bounds=bounds,
-            rng=rng,
-            mean_y=mean_y,
-        )
+    if initial_precision <= 0:
+        initial_precision = np.sqrt(bounds[1] * bounds[0])
+
+    best, _ = grid_search(
+        func,
+        evaluate,
+        t_dependent,
+        t_features,
+        search_rounds,
+        initial_precision=np.atleast_1d(initial_precision),
+        bounds=bounds,
+        mean_y=mean_y,
+    )
 
     return best
 

@@ -279,7 +279,7 @@ class KernelBooster:
         if self.min_features > X.shape[1]:
             raise ValueError(
                 f"min_features ({self.min_features}) exceeds the number of "
-                f"features ({self.n_features_in_})"
+                f"features ({X.shape[1]})"
             )
 
         if eval_set is not None:
@@ -414,7 +414,6 @@ class KernelBooster:
         self.quantile_trees_ = None
         self.quantile_constructors_ = None
         self.loo_gap_ = None
-        self.last_precision_ = self.kernel_optimization["initial_precision"]
         if self.random_state is not None:
             self.rseed_ = self.random_state
         else:
@@ -466,7 +465,6 @@ class KernelBooster:
         self.subsample_indices_.append(idx)
         training_data = all_data[idx]
 
-        self.kernel_optimization.update({"initial_precision": self.last_precision_})
         self.trees_.append(
             KernelTree(
                 **self.tree_optimization,
@@ -479,18 +477,6 @@ class KernelBooster:
 
         # store tree predictions for hyperparameter optimization
         self.tree_predictions_.append(self.trees_[-1].predict(training_features))
-
-        if tree_type == "kernel":
-            precisions = [
-                est.precision_
-                for est, is_kern in zip(
-                    self.trees_[-1].compiled_.estimators,
-                    self.trees_[-1].compiled_.is_kernel,
-                )
-                if is_kern
-            ]
-            if precisions:
-                self.last_precision_ = np.mean(precisions)
 
         self.rho_.append(
             self.objective.line_search(
@@ -1118,6 +1104,14 @@ class KernelBooster:
             for vtree in self.variance_trees_:
                 for est, is_kern in zip(
                     vtree.compiled_.estimators, vtree.compiled_.is_kernel
+                ):
+                    if is_kern:
+                        est.use_gpu = value
+
+        if hasattr(self, "quantile_trees_") and self.quantile_trees_ is not None:
+            for qtree in self.quantile_trees_:
+                for est, is_kern in zip(
+                    qtree.compiled_.estimators, qtree.compiled_.is_kernel
                 ):
                     if is_kern:
                         est.use_gpu = value
