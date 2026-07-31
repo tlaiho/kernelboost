@@ -26,7 +26,7 @@ except OSError:
     raise OSError(
         f"Could not load C library at {_mi_libname}. "
         f"Compile it with: gcc -shared -o {_mi_libname} -fPIC kernelboost/mi_bins.c "
-        f"-lm -fopenmp -O3 -march=native -ffast-math -funroll-loops -flto"
+        f"-lm -fopenmp -O3 -funroll-loops -flto"
     )
 
 # naive histogram based 2D MI estimator
