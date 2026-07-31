@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - `staged_predict()` / `staged_predict_proba()`: generators yielding the prediction after each boosting round.
 
 ### Changed
+- Breaking: minimum supported Python version raised from 3.9 to 3.10.
 - Default feature selector changed from `RandomSelector` to `JMISelector`.
 - Default `search_rounds` changed from 20 to 10.
 - Bandwidth optimization now uses deterministic grid search in log space over pilot-estimated bounds.

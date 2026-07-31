@@ -2,6 +2,7 @@ import numpy as np
 from .tree import KernelTree
 from .feature_selection import FeatureSelector, JMISelector
 from .feature_construction import ColumnSelector
+from .objectives import Objective
 
 
 class KernelBooster:
@@ -97,6 +98,11 @@ class KernelBooster:
         verbose: int = 0,
         use_gpu: bool = False,
     ):
+        if not isinstance(objective, Objective):
+            raise TypeError(
+                f"objective must be an Objective instance (e.g. MSEObjective()), "
+                f"got {objective!r}"
+            )
         self.objective = objective
         self.feature_selector = feature_selector
 
