@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.0] - 2026-07-29
+## [0.4.0] - 2026-07-31
 
 ### Added
 - LOO training residuals for uncertainty quantification, used by `predict_variance()` (`overfit_correction` parameter).
@@ -16,16 +16,21 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Default feature selector changed from `RandomSelector` to `JMISelector`.
 - Default `search_rounds` changed from 20 to 10.
+- Bandwidth optimization now uses deterministic grid search in log space over pilot-estimated bounds.
 - `feature_importances_` is now gain-based.
 - Breaking: `predict_intervals()` now requires `eval_set` (training-residual quantile trees collapse to unconditional quantiles).
+- `RhoOptimizer.optimize_rhos()` reworked: the Gauss-Newton step applies the L2 penalty correctly, and it is now anchored at the booster's fitted rho values instead of zero. 
+- Breaking: `best_round_` removed. The early-stopping cut is expressed directly in `rho_` (rounds past the best validation round get zero weight).
 
 ### Deprecated
 - `SmartSelector`: kept for backward compatibility only; use `JMISelector` instead.
 
+### Removed
+- `RhoOptimizer.refit_trees()` and `fit_with_refit()`: refitting trees under fixed rho values is structurally unstable.
+
 ### Fixed
 - LOO variance and LOO quantile computation bugs.
-- Rho-optimizer bug relating `optimize_rhos()` fixed: the Gauss-Newton now takes the L2 regularization correctly into account.
-- Self-weight and LOO-CV guards tightened in bandwidth search.
+- Self-weight and LOO-CV guards tightened in bandwidth search, plus smaller fixes along the bandwidth optimization pipeline (`optimizer.py`, `kernels.c`).
 - Tree density split recursion bug.
 - Booster seeding.
 - Pilot bound estimation on the GPU path.

@@ -123,7 +123,7 @@ lower, upper = booster.predict_intervals(X, alpha=0.1, eval_set=(X_val, y_val))
 variance = booster.predict_variance(X)
 ```
 
-Both methods fit dedicated trees on model residuals. Quantile trees are fit on eval_set residuals: fitting them on training residuals collapses to unconditional quantiles, as boosting leaves little conditional mean signal in the residuals. Variance trees fit on training data are corrected with leave-one-out residuals by default (overfit_correction argument). The correction removes own-observation effect, but estimation bias at the booster stage is still present, which is why the variance estimate tends to overestimate the true variance. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
+Both methods fit dedicated trees on model residuals. Quantile trees are fit on eval_set residuals: fitting them on training residuals collapses to unconditional quantiles, as boosting leaves little conditional mean signal in the residuals. Variance trees fit on training data are corrected with leave-one-out residuals by default (overfit_correction argument). The correction removes own-observation effect, but estimation bias at the booster stage is still present, which is why the variance estimate tends to overestimate the true (aleatoric) variance. See [benchmarks](#uncertainty-quantification-california-housing) for a comparison with Gaussian Processes.
 
 #### Data Preprocessing
 
